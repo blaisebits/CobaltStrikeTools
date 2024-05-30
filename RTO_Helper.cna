@@ -14,6 +14,7 @@ $SHARPUP_PATH       = getFileProper("C:\\Tools\\SharpUp\\SharpUp\\bin\\Release",
 $GETSERVICEACL_PATH = getFileProper("c:\\Tools","Get-ServiceAcl.ps1");
 $POWERLURK_PATH     = getFileProper("C:\\Tools","PowerLurk.ps1");
 $CERTIFY_PATH       = getFileProper("C:\\Tools\\Certify\\Certify\\bin\\Release","Certify.exe");
+$SHARPGPOABUSE_PATH = getFileProper("C:\\Tools\\SharpGPOAbuse\\SharpGPOAbuse\\bin\\Release","SharpGPOAbuse.exe")
 
 #TEST FUNCTION
 command beacons {
@@ -569,3 +570,11 @@ beacon_command_register(
     "Use PowerPick to find modifiable GPOs",
     "Usage: gpo_convertfromsid [SID]"
 );
+alias gpo_sharpgpoabuse {
+    bexecute_assembly($1, $SHARPGPOABUSE_PATH, $2);
+}
+beacon_command_register(
+    "gpo_sharpgpoabuse",
+    "Calls SharGPOAbuse.exe",
+    "Usage: gpo_sharpgpoabuse \"<command>\""
+)
