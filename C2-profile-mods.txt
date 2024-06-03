@@ -1,0 +1,14 @@
+stage {
+        set userwx "false";
+        set cleanup "true";
+        set obfuscate "true";
+        set module_x64 "xpservices.dll";
+}
+post-ex {
+      # control the temporary process we spawn to
+        set spawnto_x86 "%windir%\\syswow64\\dllhost.exe";
+        set spawnto_x64 "%windir%\\sysnative\\dllhost.exe";
+        set obfuscate "true";
+        set amsi_disable "true";
+        set cleanup "true";
+}
