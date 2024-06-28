@@ -767,16 +767,6 @@ beacon_command_register(
     "Returns DisplayName & GPC File Path for a GPO ND"
     . "Usage: gpo_getdetails [GPO DN]"
 )
-alias gpo_locategpo {
-    #bpowershell_import($1, $POWERVIEW_PATH);
-    $command = "Get-DomainGPO -Identity \" $+ $2 $+ \" | select displayname,gpcfilesyspath";
-    bpowerpick($1, $command);
-}
-beacon_command_register(
-    "gpo_locategpos",
-    "Use PowerPick to find modifiable GPOs",
-    "Usage: gpo_locategpos [GPO DN]"
-);
 alias gpo_convertfromsid {
     $command = "ConvertFrom-SID  $+ $2 $+ ";
     bpowerpick($1, $command);
