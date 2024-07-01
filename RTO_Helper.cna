@@ -283,26 +283,26 @@ beacon_command_register (
 alias get_domainmassrecon {
     bpowershell_import($1, $POWERVIEW_PATH);
 
-    @commands = @(
-    'Get-Domain',
-    'Get-DomainController | select Forest, Name, OSVersion | fl',
-    'Get-ForestDomain',
-    'Get-DomainPolicyData | select -expand SystemAccess',
-    'Get-DomainComputer -Properties DnsHostName | sort -Property DnsHostName',
-    'Get-DomainOU -Properties Name | sort -Property Name',
-    'Get-DomainGroup | where Name -like "*Admins*" | select SamAccountName',
-    'Get-DomainGroupMember -Identity "Domain Admins" | select MemberDistinguishedName',
-    'Get-DomainGPO -Properties DisplayName | sort -Property DisplayName',
-    'Get-DomainGPOLocalGroup | select GPODisplayName, GroupName',
-    'Get-DomainGPOUserLocalGroupMapping -LocalGroup Administrators | select ObjectName, GPODisplayName, ContainerName, ComputerName | fl',
-    'Get-DomainTrust',
-    'Get-DomainUser -Properties DisplayName, MemberOf | fl'
-    );
+    # @commands = @(
+    # 'Get-Domain',
+    # 'Get-DomainController | select Forest, Name, OSVersion | fl',
+    # 'Get-ForestDomain',
+    # 'Get-DomainPolicyData | select -expand SystemAccess',
+    # 'Get-DomainComputer -Properties DnsHostName | sort -Property DnsHostName',
+    # 'Get-DomainOU -Properties Name | sort -Property Name',
+    # 'Get-DomainGroup | where Name -like "*Admins*" | select SamAccountName',
+    # 'Get-DomainGroupMember -Identity "Domain Admins" | select MemberDistinguishedName',
+    # 'Get-DomainGPO -Properties DisplayName | sort -Property DisplayName',
+    # 'Get-DomainGPOLocalGroup | select GPODisplayName, GroupName',
+    # 'Get-DomainGPOUserLocalGroupMapping -LocalGroup Administrators | select ObjectName, GPODisplayName, ContainerName, ComputerName | fl',
+    # 'Get-DomainTrust',
+    # 'Get-DomainUser -Properties DisplayName, MemberOf | fl'
+    # );
 
-    foreach $index => $value (@commands) {
-        btask($1, $value);
-        bpowerpick($1, $value);
-    }
+    # foreach $index => $value (@commands) {
+    #     btask($1, $value);
+    #     bpowerpick($1, $value);
+    # }
     $command = 'Write-Host "===Domain Information===";Get-Domain;Write-Host "===Domain Controllers===";Get-DomainController | select Forest, Name, OSVersion | fl;Write-Host "Forest Domains";Get-ForestDomain;Write-Host "===Domain Policy===";Get-DomainPolicyData | select -expand SystemAccess;Write-Host "===Domain Computers===";Get-DomainComputer -Properties DnsHostName | sort -Property DnsHostName;Write-Host "===Domain OUs===";Get-DomainOU -Properties Name | sort -Property Name;Write-Host "===Admin Groups===";Get-DomainGroup | where Name -like "*Admins*" | select SamAccountName;Write-Host "===Domain Admins===";Get-DomainGroupMember -Identity "Domain Admins" | select MemberDistinguishedName;Write-Host "===Domain GPOs===";Get-DomainGPO -Properties DisplayName | sort -Property DisplayName;Write-Host "===GPO Local Groups===";Get-DomainGPOLocalGroup | select GPODisplayName, GroupName;Write-Host "===GPO User Local Group Mapping===";Get-DomainGPOUserLocalGroupMapping -LocalGroup Administrators | select ObjectName, GPODisplayName, ContainerName, ComputerName | fl;Write-Host "===Domain Trusts===";Get-DomainTrust;Write-Host "===Domain Users===";Get-DomainUser -Properties DisplayName, MemberOf | fl';
     bpowerpick($1, $command);
 }
