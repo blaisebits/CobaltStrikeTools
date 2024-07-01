@@ -7,7 +7,7 @@ stage {
 post-ex {
       # control the temporary process we spawn to
         set spawnto_x86 "C:\\Windows\\syswow64\\dllhost.exe";
-        set spawnto_x64 "C:\\Windows\\system32\\dllhost.exe";
+        set spawnto_x64 "C:\\Windows\\sysnative\\dllhost.exe";
         set obfuscate "true";
         set amsi_disable "true";
         set cleanup "true";
